@@ -1,3 +1,4 @@
+client.on("messageCreate", async (message) => {
 const PREFIX = "!";
 const OWNER_ID = process.env.OWNER_ID; // لازم تحطه في Render Variables
 
