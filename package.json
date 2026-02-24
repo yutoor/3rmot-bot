@@ -1,7 +1,9 @@
 {
   "name": "3rmot-bot",
   "version": "1.0.0",
+  "description": "Discord bot",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
