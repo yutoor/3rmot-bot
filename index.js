@@ -19,22 +19,17 @@ const SUPPORT_ROLE_ID = process.env.SUPPORT_ROLE_ID || null; // الدعم ال�
 
 // إعدادات التكت (اختياري)
 const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID || null; // لو تبي تقيّد على كاتيجوري
-const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;           // لو تبي تنبيه التكت يشتغل للموظفين فقط
+const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;           // لو تبي تنبيه المنشن يشتغل للموظفين فقط
 
-// كولداون لمنع السبام (لتنبيه التكت)
+// كولداون لمنع السبام (لتنبيه التكت بالمنشن)
 const cooldown = new Map();
 const COOLDOWN_MS = 60 * 1000;
 
 function hasCommandPermission(member) {
   if (!member) return false;
-
-  // أدمن السيرفر
   if (member.permissions?.has("Administrator")) return true;
-
-  // رولات محددة
   if (ADMIN_ROLE_ID && member.roles.cache.has(ADMIN_ROLE_ID)) return true;
   if (SUPPORT_ROLE_ID && member.roles.cache.has(SUPPORT_ROLE_ID)) return true;
-
   return false;
 }
 
@@ -42,6 +37,39 @@ function isTicketChannel(channel) {
   if (channel?.name?.toLowerCase().startsWith("ticket-")) return true;
   if (TICKET_CATEGORY_ID && channel?.parentId === TICKET_CATEGORY_ID) return true;
   return false;
+}
+
+// ====== قوالب ثابتة ======
+function ticketTemplate(guildName, channelName, url, body) {
+  return (
+    `⚠️ *تنبيه تكت*\n` +
+    `📌 السيرفر: **${guildName}**\n` +
+    `🧾 التكت: **#${channelName}**\n` +
+    `━━━━━━━━━━━━\n` +
+    `${body}\n` +
+    `━━━━━━━━━━━━\n` +
+    `🔗 الرابط: ${url}`
+  );
+}
+
+function announceTemplate(guildName, body) {
+  return (
+    `📢 *تنبيه إعلان*\n` +
+    `📌 السيرفر: **${guildName}**\n` +
+    `━━━━━━━━━━━━\n` +
+    `${body}\n` +
+    `━━━━━━━━━━━━`
+  );
+}
+
+function promoTemplate(guildName, body) {
+  return (
+    `🔥 *ترويج / عرض*\n` +
+    `📌 السيرفر: **${guildName}**\n` +
+    `━━━━━━━━━━━━\n` +
+    `${body}\n` +
+    `━━━━━━━━━━━━`
+  );
 }
 
 client.on("ready", () => {
@@ -58,35 +86,38 @@ client.on("messageCreate", async (message) => {
     // ===================== أوامر (ملاك المتجر + الدعم الفني) =====================
     if (content.startsWith(PREFIX)) {
       const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-      if (!hasCommandPermission(member)) return; // أي شخص غيرهم يتجاهله
+      if (!hasCommandPermission(member)) return;
 
       const args = content.slice(PREFIX.length).trim().split(/\s+/);
       const cmd = (args.shift() || "").toLowerCase();
 
-      // مساعده
+      // ===== مساعدة =====
       if (cmd === "مساعدة" || cmd === "اوامر") {
         return message.reply(
           "**أوامر البوت:**\n" +
-          "🧾 `!تنبيه_تكت @شخص السبب`\n" +
-          "📢 `!تنبيه_اعلان @شخص السبب`\n" +
+          "🧾 `!تكت @شخص نص_الرسالة` (تنبيه تكت ثابت + نص متغير)\n" +
+          "📢 `!اعلان @شخص نص_الرسالة` (تنبيه إعلان ثابت + نص متغير)\n" +
+          "🔥 `!ترويج @شخص نص_الرسالة` (تنبيه ترويج ثابت + نص متغير)\n" +
           "⚠️ `!تحذير @شخص السبب`\n" +
-          "⏳ `!تايم_اوت @شخص 10m السبب`  (مثال 10m أو 1h)\n" +
+          "⏳ `!تايم_اوت @شخص 10m السبب` (مثال: 10m أو 1h)\n" +
           "👢 `!فصل @شخص السبب`\n"
         );
       }
 
-      // !تنبيه_تكت @user سبب
-      if (cmd === "تنبيه_تكت") {
+      // ===== !تكت @شخص نص =====
+      if (cmd === "تكت") {
         const target = message.mentions.users.first();
-        if (!target) return message.reply("اكتب: `!تنبيه_تكت @شخص السبب`");
+        if (!target) return message.reply("اكتب: `!تكت @شخص نص_الرسالة`");
 
-        const reason = args.filter(x => !x.startsWith("<@")).join(" ").trim() || "في موظف ينتظرك في التكت";
-        const dmText =
-          `⚠️ تنبيه تكت\n` +
-          `📌 السيرفر: **${message.guild.name}**\n` +
-          `🧾 المكان: **#${message.channel?.name || "ticket"}**\n` +
-          `📝 السبب: ${reason}\n` +
-          `🔗 رابط: ${message.url}`;
+        const body = args.filter(x => !x.startsWith("<@")).join(" ").trim();
+        if (!body) return message.reply("لازم تكتب نص الرسالة بعد المنشن.");
+
+        const dmText = ticketTemplate(
+          message.guild.name,
+          message.channel?.name || "ticket",
+          message.url,
+          body
+        );
 
         await target.send(dmText)
           .then(() => message.reply("✅ تم إرسال تنبيه التكت بالخاص."))
@@ -94,19 +125,39 @@ client.on("messageCreate", async (message) => {
         return;
       }
 
-      // !تنبيه_اعلان @user سبب
-      if (cmd === "تنبيه_اعلان") {
+      // ===== !اعلان @شخص نص =====
+      if (cmd === "اعلان") {
         const target = message.mentions.users.first();
-        if (!target) return message.reply("اكتب: `!تنبيه_اعلان @شخص السبب`");
+        if (!target) return message.reply("اكتب: `!اعلان @شخص نص_الرسالة`");
 
-        const reason = args.filter(x => !x.startsWith("<@")).join(" ").trim() || "في إعلان جديد";
-        await target.send(`📢 تنبيه إعلان\n📌 **${message.guild.name}**\n📝 ${reason}`)
+        const body = args.filter(x => !x.startsWith("<@")).join(" ").trim();
+        if (!body) return message.reply("لازم تكتب نص الرسالة بعد المنشن.");
+
+        const dmText = announceTemplate(message.guild.name, body);
+
+        await target.send(dmText)
           .then(() => message.reply("✅ تم إرسال تنبيه الإعلان بالخاص."))
           .catch(() => message.reply("❌ ما قدرت أرسل DM (خاصه مقفل)."));
         return;
       }
 
-      // !تحذير @user سبب
+      // ===== !ترويج @شخص نص =====
+      if (cmd === "ترويج") {
+        const target = message.mentions.users.first();
+        if (!target) return message.reply("اكتب: `!ترويج @شخص نص_الرسالة`");
+
+        const body = args.filter(x => !x.startsWith("<@")).join(" ").trim();
+        if (!body) return message.reply("لازم تكتب نص الترويج بعد المنشن.");
+
+        const dmText = promoTemplate(message.guild.name, body);
+
+        await target.send(dmText)
+          .then(() => message.reply("✅ تم إرسال الترويج بالخاص."))
+          .catch(() => message.reply("❌ ما قدرت أرسل DM (خاصه مقفل)."));
+        return;
+      }
+
+      // ===== !تحذير @شخص السبب =====
       if (cmd === "تحذير") {
         const target = message.mentions.members.first();
         if (!target) return message.reply("اكتب: `!تحذير @شخص السبب`");
@@ -117,7 +168,7 @@ client.on("messageCreate", async (message) => {
         return;
       }
 
-      // !تايم_اوت @user 10m سبب
+      // ===== !تايم_اوت @شخص 10m السبب =====
       if (cmd === "تايم_اوت") {
         const target = message.mentions.members.first();
         if (!target) return message.reply("اكتب: `!تايم_اوت @شخص 10m السبب`");
@@ -143,7 +194,7 @@ client.on("messageCreate", async (message) => {
         return;
       }
 
-      // !فصل @user سبب
+      // ===== !فصل @شخص السبب =====
       if (cmd === "فصل") {
         const target = message.mentions.members.first();
         if (!target) return message.reply("اكتب: `!فصل @شخص السبب`");
@@ -158,7 +209,7 @@ client.on("messageCreate", async (message) => {
       return message.reply("❌ أمر غير معروف. اكتب `!مساعدة`.");
     }
 
-    // ===================== تنبيه التكت بالمنشن =====================
+    // ===================== تنبيه التكت بالمنشن (تلقائي) =====================
     if (!isTicketChannel(message.channel)) return;
 
     // لو حاط STAFF_ROLE_ID: لا يرسل إلا إذا الكاتب موظف
@@ -178,6 +229,7 @@ client.on("messageCreate", async (message) => {
       if (Date.now() - last < COOLDOWN_MS) continue;
       cooldown.set(key, Date.now());
 
+      // هذا التنبيه ثابت
       const dmText =
         `⚠️ تنبيه: في موظف ينتظرك في التكت.\n` +
         `📌 السيرفر: **${message.guild.name}**\n` +
