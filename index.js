@@ -12,17 +12,30 @@ const client = new Client({
 
 // ====== إعدادات ======
 const PREFIX = "!";
-const OWNER_ID = process.env.OWNER_ID;
 
-const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID || null; // اختياري
-const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null; // اختياري
+// رولات اللي يقدرون يستخدمون الأوامر
+const ADMIN_ROLE_ID = process.env.ADMIN_ROLE_ID || null;     // ملاك المتجر
+const SUPPORT_ROLE_ID = process.env.SUPPORT_ROLE_ID || null; // الدعم الفني
+
+// إعدادات التكت (اختياري)
+const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID || null; // لو تبي تقيّد على كاتيجوري
+const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;           // لو تبي تنبيه التكت يشتغل للموظفين فقط
 
 // كولداون لمنع السبام (لتنبيه التكت)
 const cooldown = new Map();
 const COOLDOWN_MS = 60 * 1000;
 
-function ownerOnly(message) {
-  return OWNER_ID && message.author.id === OWNER_ID;
+function hasCommandPermission(member) {
+  if (!member) return false;
+
+  // أدمن السيرفر
+  if (member.permissions?.has("Administrator")) return true;
+
+  // رولات محددة
+  if (ADMIN_ROLE_ID && member.roles.cache.has(ADMIN_ROLE_ID)) return true;
+  if (SUPPORT_ROLE_ID && member.roles.cache.has(SUPPORT_ROLE_ID)) return true;
+
+  return false;
 }
 
 function isTicketChannel(channel) {
@@ -42,9 +55,10 @@ client.on("messageCreate", async (message) => {
 
     const content = (message.content || "").trim();
 
-    // ===================== أوامر (لك أنت فقط) =====================
+    // ===================== أوامر (ملاك المتجر + الدعم الفني) =====================
     if (content.startsWith(PREFIX)) {
-      if (!ownerOnly(message)) return; // محد غيرك يقدر يستخدمها
+      const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+      if (!hasCommandPermission(member)) return; // أي شخص غيرهم يتجاهله
 
       const args = content.slice(PREFIX.length).trim().split(/\s+/);
       const cmd = (args.shift() || "").toLowerCase();
@@ -52,7 +66,7 @@ client.on("messageCreate", async (message) => {
       // مساعده
       if (cmd === "مساعدة" || cmd === "اوامر") {
         return message.reply(
-          "**أوامري (خاصه فيك):**\n" +
+          "**أوامر البوت:**\n" +
           "🧾 `!تنبيه_تكت @شخص السبب`\n" +
           "📢 `!تنبيه_اعلان @شخص السبب`\n" +
           "⚠️ `!تحذير @شخص السبب`\n" +
