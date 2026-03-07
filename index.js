@@ -8,6 +8,7 @@ const {
   VoiceConnectionStatus,
   entersState,
 } = require("@discordjs/voice");
+
 const play = require("play-dl");
 
 // ===== الإعدادات =====
@@ -28,29 +29,20 @@ let player = createAudioPlayer({
   },
 });
 
-let currentGuildId = null;
+let guildId = null;
 
-// دخول الروم
-async function joinChannel(guild) {
-  try {
-    const channel = guild.channels.cache.get(VOICE_CHANNEL_ID);
+// دخول الروم الصوتي
+async function joinVoice(guild) {
+  const channel = guild.channels.cache.get(VOICE_CHANNEL_ID);
 
-    if (!channel) {
-      console.log("❌ الروم الصوتي غير موجود");
-      return null;
-    }
+  if (!channel) {
+    console.log("❌ الروم الصوتي غير موجود");
+    return;
+  }
 
-    if (!channel.isVoiceBased()) {
-      console.log("❌ هذا ليس روم صوتي");
-      return null;
-    }
+  let connection = getVoiceConnection(guild.id);
 
-    let connection = getVoiceConnection(guild.id);
-
-    if (connection) {
-      return connection;
-    }
-
+  if (!connection) {
     connection = joinVoiceChannel({
       channelId: channel.id,
       guildId: guild.id,
@@ -62,18 +54,15 @@ async function joinChannel(guild) {
     await entersState(connection, VoiceConnectionStatus.Ready, 15000);
 
     connection.subscribe(player);
-    currentGuildId = guild.id;
+    guildId = guild.id;
 
     console.log("✅ البوت دخل الروم الصوتي");
-
-    return connection;
-  } catch (err) {
-    console.log("❌ خطأ دخول الروم:", err);
-    return null;
   }
+
+  return connection;
 }
 
-// تشغيل الصوت من يوتيوب
+// تشغيل الصوت
 async function playSound() {
   try {
     const stream = await play.stream(YOUTUBE_URL);
@@ -82,72 +71,66 @@ async function playSound() {
       inputType: stream.type,
     });
 
-    player.stop(true);
+    player.stop();
     player.play(resource);
 
-    console.log("🔊 تشغيل الصوت من يوتيوب");
+    console.log("🔊 تشغيل الصوت");
   } catch (err) {
     console.log("❌ خطأ تشغيل الصوت:", err);
   }
 }
 
-// إذا البوت طلع من الروم يرجع يدخل
-async function ensureBotInVoice() {
-  try {
-    if (!currentGuildId) return;
+// تثبيت البوت في الصوتية
+async function keepBotInVoice() {
+  if (!guildId) return;
 
-    const guild = client.guilds.cache.get(currentGuildId);
-    if (!guild) return;
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) return;
 
-    const connection = getVoiceConnection(guild.id);
-    if (!connection) {
-      await joinChannel(guild);
-    }
-  } catch (err) {
-    console.log("❌ خطأ التثبيت في الروم:", err);
+  const connection = getVoiceConnection(guild.id);
+
+  if (!connection) {
+    console.log("♻️ إعادة دخول الصوتية...");
+    await joinVoice(guild);
   }
 }
 
+// جاهزية البوت
 client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   const guild = client.guilds.cache.first();
+
   if (!guild) {
-    console.log("❌ ما فيه سيرفر");
+    console.log("❌ لا يوجد سيرفر");
     return;
   }
 
-  await joinChannel(guild);
+  await joinVoice(guild);
 
-  // فحص كل 20 ثانية
-  setInterval(async () => {
-    await ensureBotInVoice();
+  setInterval(() => {
+    keepBotInVoice();
   }, 20000);
 });
 
-// كل ما دخل عضو جديد يشغل الصوت من البداية
+// دخول عضو جديد
 client.on("voiceStateUpdate", async (oldState, newState) => {
-  try {
-    if (newState.member?.user?.bot) return;
+  if (newState.member.user.bot) return;
 
-    const joinedTarget =
-      oldState.channelId !== VOICE_CHANNEL_ID &&
-      newState.channelId === VOICE_CHANNEL_ID;
+  const joined =
+    oldState.channelId !== VOICE_CHANNEL_ID &&
+    newState.channelId === VOICE_CHANNEL_ID;
 
-    if (joinedTarget) {
-      console.log(`👤 دخل عضو جديد: ${newState.member.user.tag}`);
+  if (joined) {
+    console.log(`👤 دخل عضو: ${newState.member.user.tag}`);
 
-      let connection = getVoiceConnection(newState.guild.id);
-      if (!connection) {
-        connection = await joinChannel(newState.guild);
-      }
+    const connection = getVoiceConnection(newState.guild.id);
 
-      if (connection) {
-        await playSound();
-      }
+    if (!connection) {
+      await joinVoice(newState.guild);
     }
-  } catch (err) {
-    console.log("❌ خطأ voiceStateUpdate:", err);
+
+    playSound();
   }
 });
 
