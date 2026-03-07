@@ -5,140 +5,67 @@ const {
 
 const client = new Client({
     intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers, 
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, 
+        GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
     ],
     partials: [Partials.Channel],
 });
 
-// --- الإعدادات ---
-const PREFIX = "!";
-const ADMIN_ROLE_ID = process.env.ADMIN_ROLE_ID;
-const BROADCAST_ROLE_ID = process.env.BROADCAST_ROLE_ID;
-const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID;
-
-const sessions = new Map();
+// --- الإعدادات الثابتة ---
+const ADMIN_ROLE_ID = "1466572944166883461"; // الرتبة المسموح لها باستدعاء البوت
+const BROADCAST_ROLE_ID = process.env.BROADCAST_ROLE_ID; // رتبة الإعلان الجماعي
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const sessions = new Map();
 
 client.on("ready", () => {
-    console.log(`✅ تم تشغيل البوت بنجاح باسم: ${client.user.tag}`);
+    console.log(`🚀 تم تشغيل أقوى بوت: ${client.user.tag}`);
 });
 
-// ===================== [1] تنبيه عند فتح تكت جديد =====================
-client.on("channelCreate", async (channel) => {
-    try {
-        if (!channel.guild) return;
-        const isTicket = channel.name.toLowerCase().startsWith("ticket-") || (TICKET_CATEGORY_ID && channel.parentId === TICKET_CATEGORY_ID);
-        if (!isTicket) return;
-
-        const ticketEmbed = new EmbedBuilder()
-            .setColor(0xffa500)
-            .setTitle("🆕 تنبيه: تكت جديد!")
-            .setDescription(`تم فتح تكت جديد بواسطة أحد الأعضاء: ${channel}`)
-            .addFields({ name: "رابط التكت", value: `[اضغط هنا للانتقال](https://discord.com/channels/${channel.guild.id}/${channel.id})` })
-            .setTimestamp()
-            .setFooter({ text: "نظام التنبيهات التلقائي" });
-
-        const adminRole = await channel.guild.roles.fetch(ADMIN_ROLE_ID).catch(() => null);
-        if (adminRole) {
-            adminRole.members.forEach(m => {
-                if (!m.user.bot) m.user.send({ embeds: [ticketEmbed] }).catch(() => null);
-            });
-        }
-    } catch (err) { console.error("خطأ في تنبيه التكت:", err); }
-});
-
-// ===================== [2] أمر المساعدة (لوحة التحكم) =====================
+// ===================== [1] أمر المساعدة (استدعاء البوت) =====================
 client.on("messageCreate", async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    if (message.content === PREFIX + "مساعدة") {
-        // التحقق من الصلاحيات
-        if (!message.member.roles.cache.has(ADMIN_ROLE_ID) && !message.member.permissions.has("Administrator")) return;
+    // قبول "مساعدة" أو "مساعده" بدون استفهام وبأي مسافة
+    const content = message.content.trim().replace(/\s+/g, ' ');
+    if (content === "مساعدة" || content === "مساعده" || content === "!مساعدة") {
+        
+        // التحقق الصارم من الرتبة
+        if (!message.member.roles.cache.has(ADMIN_ROLE_ID)) return;
 
-        // حذف رسالة الأمر فوراً
+        // حذف رسالة الاستدعاء فوراً
         setTimeout(() => message.delete().catch(() => null), 500);
 
         const mainEmbed = new EmbedBuilder()
-            .setColor(0x2b2d31)
-            .setTitle("🛠️ لوحة تحكم الإدارة")
-            .setDescription("مرحباً بك! اختر العملية التي تريد تنفيذها من الأزرار أدناه.\nسيتم تنفيذ جميع الخطوات في الخاص لضمان السرية.")
-            .setFooter({ text: "وضع التخفي نشط 🔒" });
+            .setColor(0x000000)
+            .setTitle("🛡️ لوحة التحكم الإدارية الكبرى")
+            .setDescription("# اختر العملية المطلوبة\nسيتم نقلك للخاص لتكملة الإجراءات بسرية تامة.")
+            .setTimestamp();
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('btn_broadcast').setLabel('إعلان جماعي').setStyle(ButtonStyle.Success).setEmoji('📢'),
-            new ButtonBuilder().setCustomId('btn_ticket_alert').setLabel('تنبيه صاحب تكت').setStyle(ButtonStyle.Primary).setEmoji('🎫')
+        const row1 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('op_broadcast').setLabel('إعلان للجميع').setStyle(ButtonStyle.Success).setEmoji('📢'),
+            new ButtonBuilder().setCustomId('op_warn').setLabel('تحذير').setStyle(ButtonStyle.Danger).setEmoji('⚠️'),
+            new ButtonBuilder().setCustomId('op_kick').setLabel('فصل (Kick)').setStyle(ButtonStyle.Danger).setEmoji('👢')
         );
 
-        await message.channel.send({ embeds: [mainEmbed], components: [row] });
+        const row2 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('op_alert').setLabel('تنبيه خاص').setStyle(ButtonStyle.Primary).setEmoji('🔔'),
+            new ButtonBuilder().setCustomId('op_role').setLabel('إعطاء رتبة').setStyle(ButtonStyle.Secondary).setEmoji('🎖️')
+        );
+
+        await message.channel.send({ embeds: [mainEmbed], components: [row1, row2] });
     }
 });
 
-// ===================== [3] معالجة الأزرار والرسائل الخاصة =====================
+// ===================== [2] معالجة الأزرار والخاص والـ AI =====================
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isButton()) return;
+    if (!interaction.member.roles.cache.has(ADMIN_ROLE_ID)) return interaction.reply({ content: "لا تملك الصلاحية.", ephemeral: true });
 
-    if (interaction.customId === 'btn_broadcast') {
-        sessions.set(interaction.user.id, { step: "ask_promo", guildId: interaction.guild.id });
-        await interaction.user.send("📢 **إعلان جماعي:**\nأرسل الآن نص الإعلان الذي تريد إرساله للجميع (سيتم تطبيق فاصل 10 ثوانٍ تلقائياً).");
-        await interaction.reply({ content: "تم إرسال التفاصيل في الخاص! 🔒", ephemeral: true });
-    }
+    const op = interaction.customId;
+    sessions.set(interaction.user.id, { step: "init", action: op, guildId: interaction.guild.id });
 
-    if (interaction.customId === 'btn_ticket_alert') {
-        sessions.set(interaction.user.id, { step: "ask_ticket_user", guildId: interaction.guild.id });
-        await interaction.user.send("🎫 **تنبيه تكت:**\nقم بعمل منشن (Tag) للعضو أو أرسل الـ ID الخاص به لتنبيهه.");
-        await interaction.reply({ content: "تم إرسال التفاصيل في الخاص! 🔒", ephemeral: true });
-    }
-});
-
-// ===================== [4] تنفيذ العمليات في الخاص =====================
-client.on("messageCreate", async (message) => {
-    if (message.guild || message.author.bot) return;
-
-    const sess = sessions.get(message.author.id);
-    if (!sess) return;
-
-    // --- تنبيه صاحب التكت ---
-    if (sess.step === "ask_ticket_user") {
-        const userId = message.content.replace(/[<@!>]/g, "");
-        sess.targetUserId = userId;
-        sess.step = "ask_ticket_body";
-        return message.reply("✍️ الآن أرسل الرسالة التي تريد توجيهها لهذا العضو:");
-    }
-    
-    if (sess.step === "ask_ticket_body") {
-        const guild = client.guilds.cache.get(sess.guildId);
-        const target = await guild.members.fetch(sess.targetUserId).catch(() => null);
-        if (target) {
-            await target.send(`⚠️ **تنبيه هام بخصوص التكت الخاص بك في ${guild.name}**\n\n${message.content}`).catch(() => null);
-            message.reply("✅ تم إرسال التنبيه للعضو بنجاح.");
-        } else { message.reply("❌ لم أتمكن من العثور على هذا العضو."); }
-        return sessions.delete(message.author.id);
-    }
-
-    // --- الإرسال الجماعي ---
-    if (sess.step === "ask_promo") {
-        const guild = client.guilds.cache.get(sess.guildId);
-        const role = await guild.roles.fetch(BROADCAST_ROLE_ID).catch(() => null);
-        const targets = role ? role.members.filter(m => !m.user.bot) : [];
-
-        if (!targets.size) return message.reply("❌ لا يوجد أعضاء في الرتبة المحددة.");
-        
-        sessions.delete(message.author.id);
-        await message.reply(`⏳ جاري بدء الإرسال لـ ${targets.size} عضو...`);
-
-        const targetArray = Array.from(targets.values());
-        for (let i = 0; i < targetArray.length; i++) {
-            try {
-                await targetArray[i].send(`📢 **تحديث جديد من ${guild.name}**\n\n${message.content}`);
-            } catch (e) { console.log(`فشل الإرسال للعضو: ${targetArray[i].user.tag}`); }
-            if (i < targetArray.length - 1) await wait(10000); // فاصل 10 ثوانٍ
-        }
-        return message.author.send("✅ تم الانتهاء من عملية الإرسال الجماعي بنجاح.");
-    }
-});
-
-client.login(process.env.DISCORD_TOKEN);
+    let startText = "بدأت العملية! ";
+    if (op === 'op_broadcast') startText += "أرسل نص **الإعلان** الآن.";
+    else if (op === 'op_role') startText += "أرسل **آيدي الشخص** ثم **آيدي الرتبة**.";
+    else startText += "قم بعمل **منشن للعضو
