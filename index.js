@@ -10,15 +10,12 @@ const {
   getVoiceConnection,
   StreamType,
 } = require("@discordjs/voice");
-
-const prism = require("prism-media");
-const ffmpegPath = require("ffmpeg-static");
 const path = require("path");
 const fs = require("fs");
 
 // ===== الإعدادات =====
 const VOICE_CHANNEL_ID = "1466581684290850984";
-const AUDIO_FILE = path.join(__dirname, "3rmot_welcome.wav");
+const AUDIO_FILE = path.join(__dirname, "3rmot_welcome.ogg");
 
 const client = new Client({
   intents: [
@@ -97,32 +94,14 @@ function playWelcome() {
   try {
     console.log("📁 Audio path:", AUDIO_FILE);
     console.log("📁 Audio exists:", fs.existsSync(AUDIO_FILE));
-    console.log("🎛️ ffmpeg path:", ffmpegPath);
 
     if (!fs.existsSync(AUDIO_FILE)) {
       console.log("❌ ملف الصوت غير موجود");
       return;
     }
 
-    if (!ffmpegPath) {
-      console.log("❌ ffmpeg-static غير موجود");
-      return;
-    }
-
-    const stream = new prism.FFmpeg({
-      args: [
-        "-analyzeduration", "0",
-        "-loglevel", "0",
-        "-i", AUDIO_FILE,
-        "-f", "s16le",
-        "-ar", "48000",
-        "-ac", "2",
-      ],
-      executable: ffmpegPath,
-    });
-
-    const resource = createAudioResource(stream, {
-      inputType: StreamType.Raw,
+    const resource = createAudioResource(AUDIO_FILE, {
+      inputType: StreamType.OggOpus,
     });
 
     const p = getPlayer();
@@ -189,7 +168,6 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
       }
     }
 
-    // إذا البوت نفسه طلع من الروم يرجع يدخل
     if (
       oldState.member?.id === client.user.id &&
       oldState.channelId === VOICE_CHANNEL_ID &&
