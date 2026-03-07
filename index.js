@@ -19,26 +19,33 @@ const BROADCAST_ROLE_ID = "1467517313980043448";
 const SUPPORT_VC_ID = "1466581684290850984"; 
 const moonImage = "https://images.unsplash.com/photo-1532767153582-b1a0e5145009?q=80&w=1000"; 
 
-// --- [ 1. تشغيل البوت وتثبيت الصوت 24/7 ] ---
-client.on("ready", () => {
-    console.log(`✅ ${client.user.tag} أونلاين ونظام الصوت شغال!`);
-    const channel = client.channels.cache.get(SUPPORT_VC_ID);
+// وظيفة مخصصة لإدخال البوت للروم الصوتي
+function connectToSupportVC(guild) {
+    const channel = guild.channels.cache.get(SUPPORT_VC_ID);
     if (channel) {
-        try {
-            joinVoiceChannel({
-                channelId: channel.id,
-                guildId: channel.guild.id,
-                adapterCreator: channel.guild.voiceAdapterCreator,
-            });
-        } catch (e) { console.error("خطأ في دخول الروم الصوتي عند التشغيل:", e); }
+        joinVoiceChannel({
+            channelId: channel.id,
+            guildId: guild.id,
+            adapterCreator: guild.voiceAdapterCreator,
+        });
+        return true;
     }
+    return false;
+}
+
+// --- [ 1. تشغيل البوت وتثبيت الصوت ] ---
+client.on("ready", () => {
+    console.log(`✅ ${client.user.tag} متصل وجاهز للعمل!`);
+    client.guilds.cache.forEach(guild => connectToSupportVC(guild));
 });
 
 // --- [ 2. نظام الترحيب الصوتي الفوري (بمجرد دخول العضو) ] ---
 client.on("voiceStateUpdate", async (oldState, newState) => {
-    // إذا دخل عضو جديد للروم ولم يكن هو البوت
+    // التحقق: إذا دخل شخص للروم، ولم يكن هو البوت، وكان الروم هو روم الدعم
     if (newState.channelId === SUPPORT_VC_ID && !newState.member.user.bot && oldState.channelId !== newState.channelId) {
         
+        console.log(`📢 ترحيب فوري بالعضو: ${newState.member.user.tag}`);
+
         const connection = joinVoiceChannel({
             channelId: newState.channelId,
             guildId: newState.guild.id,
@@ -46,7 +53,6 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         });
 
         const player = createAudioPlayer();
-        // اسم الملف المرفوع في GitHub الخاص بك
         const resource = createAudioResource('./3rmot_welcome.mp3'); 
 
         player.play(resource);
@@ -54,7 +60,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     }
 });
 
-// --- [ 3. لوحة التحكم الإدارية الكاملة (7 أزرار) ] ---
+// --- [ 3. لوحة التحكم الإدارية (7 أزرار) ] ---
 client.on("messageCreate", async (message) => {
     if (message.author.bot || !message.guild) return;
     if (message.content === "مساعدة" || message.content === "مساعده") {
@@ -64,48 +70,44 @@ client.on("messageCreate", async (message) => {
         const mainEmbed = new EmbedBuilder()
             .setColor(0x000000)
             .setTitle("🛡️ لوحة التحكم الإدارية الكبرى")
-            .setDescription("# نظام التحكم الشبح نشط\nاستخدم الأزرار أدناه لتنفيذ العمليات.")
+            .setDescription("# نظام 3RMOT نشط\nاستخدم الأزرار أدناه للتحكم في البوت والعمليات الإدارية.")
             .setImage(moonImage)
             .setFooter({ text: "3RMOT System", iconURL: client.user.displayAvatarURL() });
 
         const row1 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('modal_broadcast').setLabel('إعلان جماعي').setStyle(ButtonStyle.Success).setEmoji('📢'),
+            new ButtonBuilder().setCustomId('modal_broadcast').setLabel('إعلان').setStyle(ButtonStyle.Success).setEmoji('📢'),
             new ButtonBuilder().setCustomId('modal_warn').setLabel('تحذير').setStyle(ButtonStyle.Danger).setEmoji('⚠️'),
-            new ButtonBuilder().setCustomId('modal_kick').setLabel('فصل (Kick)').setStyle(ButtonStyle.Danger).setEmoji('👢'),
-            new ButtonBuilder().setCustomId('modal_alert').setLabel('تنبيه خاص').setStyle(ButtonStyle.Primary).setEmoji('🔔')
+            new ButtonBuilder().setCustomId('modal_kick').setLabel('طرد').setStyle(ButtonStyle.Danger).setEmoji('👢'),
+            new ButtonBuilder().setCustomId('modal_alert').setLabel('تنبيه').setStyle(ButtonStyle.Primary).setEmoji('🔔')
         );
 
         const row2 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('modal_role').setLabel('إعطاء رتبة').setStyle(ButtonStyle.Secondary).setEmoji('🎖️'),
+            new ButtonBuilder().setCustomId('modal_role').setLabel('رتبة').setStyle(ButtonStyle.Secondary).setEmoji('🎖️'),
             new ButtonBuilder().setCustomId('modal_info').setLabel('معلومات').setStyle(ButtonStyle.Secondary).setEmoji('ℹ️'),
-            new ButtonBuilder().setCustomId('btn_restart').setLabel('ريستارت').setStyle(ButtonStyle.Danger).setEmoji('🔄')
+            new ButtonBuilder().setCustomId('btn_reconnect_vc').setLabel('إعادة اتصال صوتي').setStyle(ButtonStyle.Primary).setEmoji('🔄')
         );
 
         await message.channel.send({ embeds: [mainEmbed], components: [row1, row2] });
     }
 });
 
-// --- [ 4. معالجة التفاعلات (أزرار، ريستارت، مودالز) ] ---
+// --- [ 4. معالجة التفاعلات ] ---
 client.on("interactionCreate", async (interaction) => {
-    if (!interaction.guild) return;
+    if (!interaction.guild || !interaction.member.roles.cache.has(ADMIN_ROLE_ID)) return;
 
-    // التحقق من الرتبة الإدارية لجميع التفاعلات
-    if (!interaction.member.roles.cache.has(ADMIN_ROLE_ID)) {
-        return interaction.reply({ content: "❌ ليس لديك صلاحية لاستخدام هذه اللوحة.", ephemeral: true });
-    }
-
-    // زر الريستارت
-    if (interaction.isButton() && interaction.customId === 'btn_restart') {
-        await interaction.reply({ content: "🔄 جاري إعادة تشغيل النظام... سيختفي البوت لثوانٍ ويعود.", ephemeral: true });
-        console.log("⚠️ تم طلب ريستارت من الديسكورد...");
-        setTimeout(() => { process.exit(); }, 1000);
-        return;
-    }
-
-    // فتح المودالز (النوافذ المنبثقة) للأزرار الأخرى
-    if (interaction.isButton() && interaction.customId.startsWith('modal_')) {
+    if (interaction.isButton()) {
         const op = interaction.customId;
 
+        // زر إعادة الاتصال الصوتي (في حال طُرد البوت)
+        if (op === 'btn_reconnect_vc') {
+            const success = connectToSupportVC(interaction.guild);
+            return interaction.reply({ 
+                content: success ? "✅ تم إعادة البوت للروم الصوتي بنجاح!" : "❌ فشل الاتصال، تأكد من وجود الروم.", 
+                ephemeral: true 
+            });
+        }
+
+        // فتح المودالز (النوافذ المنبثقة)
         if (op === 'modal_broadcast') {
             const modal = new ModalBuilder().setCustomId('broadcast_modal').setTitle('إعلان جماعي');
             const input = new TextInputBuilder().setCustomId('text').setLabel("نص الإعلان").setStyle(TextInputStyle.Paragraph).setRequired(true);
@@ -131,13 +133,11 @@ client.on("interactionCreate", async (interaction) => {
         }
 
         if (op === 'modal_info') {
-            return interaction.reply({ content: "ℹ️ نظام 3RMOT إصدار 2.0.0 جاهز لخدمتكم.", ephemeral: true });
+            return interaction.reply({ content: "ℹ️ نظام 3RMOT الإصدار 2.1.0\nتم ضبط نظام الترحيب الصوتي الفوري.", ephemeral: true });
         }
     }
 
-    // معالجة تسليم المودال (التنفيذ الفعلي)
     if (interaction.type === InteractionType.ModalSubmit) {
-        // هنا يمكنك إضافة منطق التنفيذ لكل أمر (إرسال الإعلان، الطرد، إلخ)
         await interaction.reply({ content: "✅ تم استلام الطلب وجاري التنفيذ.", ephemeral: true });
     }
 });
