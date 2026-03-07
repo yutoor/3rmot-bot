@@ -22,7 +22,7 @@ const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // --- [ 1. تشغيل البوت وتثبيت الصوت 24/7 ] ---
 client.on("ready", () => {
-    console.log(`🌕 ${client.user.tag} جاهز مع نظام الصوت البشري!`);
+    console.log(`🌕 إدعم فني #1578 جاهز مع نظام الصوت البشري!`);
     const channel = client.channels.cache.get(SUPPORT_VC_ID);
     if (channel) {
         joinVoiceChannel({
@@ -35,6 +35,7 @@ client.on("ready", () => {
 
 // --- [ 2. نظام الترحيب الصوتي "البشري" ] ---
 client.on("voiceStateUpdate", async (oldState, newState) => {
+    // يشتغل المقطع لما "يدخل" شخص جديد للروم
     if (newState.channelId === SUPPORT_VC_ID && !newState.member.user.bot && oldState.channelId !== newState.channelId) {
         const connection = joinVoiceChannel({
             channelId: newState.channelId,
@@ -43,8 +44,8 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         });
 
         const player = createAudioPlayer();
-        // تأكد أن اسم الملف في جيت هاب هو: Your_Query_is_In_Progress.mp3
-        const resource = createAudioResource('./Your_Query_is_In_Progress.mp3'); 
+        // تم تحديث اسم الملف هنا ليطابق ملفك المرفوع
+        const resource = createAudioResource('./3rmot_welcome.mp3'); 
 
         player.play(resource);
         connection.subscribe(player);
@@ -129,7 +130,6 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.followUp({ content: `✅ تم الإرسال لـ ${targets.size} شخص.`, ephemeral: true });
     }
 
-    // (باقي العمليات: رتبة، تحذير، فصل...)
     await interaction.reply({ content: "✅ تمت العملية بنجاح.", ephemeral: true });
 });
 
