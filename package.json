@@ -1,9 +1,8 @@
 {
   "name": "3rmot-bot",
   "version": "1.0.0",
-  "description": "3RMOT Discord Bot",
+  "description": "3RMOT Discord Voice Bot",
   "main": "index.js",
-  "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
