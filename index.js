@@ -1,126 +1,94 @@
-const { Client, GatewayIntentBits, Partials } = require("discord.js");
+const { 
+    Client, 
+    GatewayIntentBits, 
+    Partials, 
+    EmbedBuilder, 
+    ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle 
+} = require("discord.js");
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers, 
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.DirectMessages,
-  ],
-  partials: [Partials.Channel], // ضروري لاستلام رسائل الخاص
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers, 
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.DirectMessages,
+    ],
+    partials: [Partials.Channel],
 });
 
-// ====== Settings / الإعدادات من Variables ======
+// إعدادات البوت من Variables
 const PREFIX = "!";
-const ADMIN_ROLE_ID = process.env.ADMIN_ROLE_ID || null;     
-const SUPPORT_ROLE_ID = process.env.SUPPORT_ROLE_ID || null; 
-const BROADCAST_ROLE_ID = process.env.BROADCAST_ROLE_ID || null;     
-const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID || null;
-const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
-
-const sessions = new Map(); 
-const SESSION_TTL_MS = 5 * 60 * 1000; // مدة الجلسة 5 دقائق
-const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-const cooldown = new Map();
-const COOLDOWN_MS = 60 * 1000;
-
-// التحقق من صلاحيات المشرف
-function hasCommandPermission(member) {
-  if (!member) return false;
-  if (member.permissions.has("Administrator")) return true;
-  if (ADMIN_ROLE_ID && member.roles.cache.has(ADMIN_ROLE_ID)) return true;
-  if (SUPPORT_ROLE_ID && member.roles.cache.has(SUPPORT_ROLE_ID)) return true;
-  return false;
-}
+const ADMIN_ROLE_ID = process.env.ADMIN_ROLE_ID;
+const BROADCAST_ROLE_ID = process.env.BROADCAST_ROLE_ID;
+const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID;
 
 client.on("ready", () => {
-  console.log(`🚀 Bot is Online: ${client.user.tag}`);
+    console.log(`✅ ${client.user.tag} is Online!`);
 });
 
-// ===================== [1] نظام تنبيه التكت (تلقائي) =====================
-client.on("channelCreate", async (channel) => {
-  try {
-    if (!channel.guild) return;
-    const isTicket = channel.name.toLowerCase().startsWith("ticket-") || 
-                     (TICKET_CATEGORY_ID && channel.parentId === TICKET_CATEGORY_ID);
-    if (!isTicket) return;
-
-    const guild = channel.guild;
-    const adminRole = ADMIN_ROLE_ID ? await guild.roles.fetch(ADMIN_ROLE_ID).catch(() => null) : null;
-    const supportRole = SUPPORT_ROLE_ID ? await guild.roles.fetch(SUPPORT_ROLE_ID).catch(() => null) : null;
-
-    const membersToNotify = new Map();
-    if (adminRole) adminRole.members.forEach(m => { if (!m.user.bot) membersToNotify.set(m.id, m); });
-    if (supportRole) supportRole.members.forEach(m => { if (!m.user.bot) membersToNotify.set(m.id, m); });
-
-    for (const [, m] of membersToNotify) {
-      await m.user.send(`🆕 **New Ticket**\nServer: ${guild.name}\nChannel: ${channel}\nLink: https://discord.com/channels/${guild.id}/${channel.id}`).catch(() => {});
-    }
-  } catch (err) { console.error("Ticket Event Error:", err); }
-});
-
-// ===================== [2] الأوامر وإدارة المحادثة (السرية) =====================
+// --- نظام الأوامر مع الـ Embed والأزرار ---
 client.on("messageCreate", async (message) => {
-  try {
-    if (message.author.bot) return;
+    if (message.author.bot || !message.guild) return;
 
-    // --- (أ) الأوامر داخل السيرفر ---
-    if (message.guild) {
-      const content = message.content.trim();
-      
-      if (content === PREFIX + "help" || content === PREFIX + "اوامر" || content === PREFIX + "مساعدة") {
-        const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-        if (!hasCommandPermission(member)) return;
+    if (message.content === PREFIX + "help" || message.content === PREFIX + "اوامر") {
+        // التحقق من الصلاحيات
+        if (!message.member.roles.cache.has(ADMIN_ROLE_ID) && !message.member.permissions.has("Administrator")) return;
 
-        // حذف أمر المستخدم فوراً للخصوصية
-        setTimeout(() => message.delete().catch(() => null), 500);
+        // حذف رسالة المستخدم لنظافة الشات
+        setTimeout(() => message.delete().catch(() => null), 1000);
 
-        try {
-          // بدء الجلسة وتحويلها للخاص
-          sessions.set(message.author.id, { 
-            step: "choose_action", 
-            createdAt: Date.now(), 
-            guildId: message.guild.id 
-          });
+        // إنشاء الـ Embed (البطاقة الملونة)
+        const helpEmbed = new EmbedBuilder()
+            .setColor(0x2b2d31) // لون ديسكورد الغامق الفخم
+            .setTitle("🛡️ Dashboard Control Panel")
+            .setDescription("Welcome to the Admin Command Center.\nUse the buttons below to manage the bot.")
+            .addFields(
+                { name: "📢 Broadcast", value: "Send safe messages to members with 10s delay.", inline: true },
+                { name: "🔒 Stealth Mode", value: "All operations are handled via DMs.", inline: true }
+            )
+            .setFooter({ text: "Secure System • March 2026", iconURL: client.user.displayAvatarURL() })
+            .setTimestamp();
 
-          await message.author.send("🔐 **Stealth Mode**\nReply with (3) for Safe Global Broadcast.");
-          
-          const notify = await message.reply("Check your DMs! 🔒");
-          setTimeout(() => notify.delete().catch(() => null), 3000);
-        } catch (e) {
-          const errNotify = await message.reply("❌ Open your DMs first!");
-          setTimeout(() => errNotify.delete().catch(() => null), 5000);
-        }
-        return;
-      }
+        // إنشاء الأزرار (Buttons)
+        const buttons = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('start_broadcast')
+                    .setLabel('Start Broadcast')
+                    .setEmoji('📢')
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setLabel('Support Server')
+                    .setURL('https://discord.gg/yourlink') // حط رابط سيرفرك هنا
+                    .setStyle(ButtonStyle.Link)
+            );
 
-      // تنبيه التكت بالمنشن (تلقائي)
-      if (TICKET_CATEGORY_ID && message.channel.parentId === TICKET_CATEGORY_ID) {
-        const mentionedUsers = message.mentions.users;
-        if (mentionedUsers.size > 0) {
-          for (const [, user] of mentionedUsers) {
-            if (user.id === message.author.id) continue;
-            const key = `${message.channelId}:${user.id}`;
-            if (Date.now() - (cooldown.get(key) || 0) < COOLDOWN_MS) continue;
-            cooldown.set(key, Date.now());
-            await user.send(`⚠️ Staff waiting: **#${message.channel.name}**\n${message.url}`).catch(() => {});
-          }
-        }
-      }
+        // إرسال الرسالة
+        const msg = await message.reply({ 
+            embeds: [helpEmbed], 
+            components: [buttons] 
+        });
+
+        // حذف الرسالة بعد 30 ثانية
+        setTimeout(() => msg.delete().catch(() => null), 30000);
     }
+});
 
-    // --- (ب) إدارة الجلسة داخل الخاص (DM) ---
-    if (!message.guild) {
-      const sess = sessions.get(message.author.id);
-      if (!sess || (Date.now() - sess.createdAt > SESSION_TTL_MS)) return;
+// معالجة ضغط الأزرار
+client.on("interactionCreate", async (interaction) => {
+    if (!interaction.isButton()) return;
 
-      const content = message.content.trim();
-      
-      if (content === "cancel" || content === "الغاء") {
-        sessions.delete(message.author.id);
-        return message.reply("❌ Cancelled.");
-      }
+    if (interaction.customId === 'start_broadcast') {
+        try {
+            await interaction.user.send("✅ **Stealth Session Started.**\nPlease type the message you want to broadcast now:");
+            await interaction.reply({ content: "Check your DMs! 🔒", ephemeral: true });
+        } catch (e) {
+            await interaction.reply({ content: "❌ Please open your DMs first.", ephemeral: true });
+        }
+    }
+});
 
-      // اختيار الترويج
-      if (sess.step === "choose
+client.login(process.env.DISCORD_TOKEN);
