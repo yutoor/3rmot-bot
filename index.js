@@ -6,96 +6,141 @@ const {
   AudioPlayerStatus,
   NoSubscriberBehavior,
   entersState,
-  VoiceConnectionStatus
+  VoiceConnectionStatus,
 } = require("@discordjs/voice");
-
 const path = require("path");
 
-// ===== إعدادات =====
+// ===== الإعدادات =====
 const TARGET_VOICE_CHANNEL_ID = "1466581684290850984"; // آيدي الروم الصوتي
-const AUDIO_FILE = path.join(__dirname, "3rmot_welcome.mp3"); // اسم ملف الصوت
+const AUDIO_FILE = path.join(__dirname, "3rmot_welcome.mp3");
 
-let isPlaying = false;
-
-// ===== إنشاء البوت =====
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMembers
-  ]
+    GatewayIntentBits.GuildMembers,
+  ],
 });
 
-client.once("ready", () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
-});
+let voiceConnection = null;
+let audioPlayer = null;
 
-// ===== تشغيل الصوت عند دخول الروم =====
-client.on("voiceStateUpdate", async (oldState, newState) => {
+// ===== دالة دخول البوت للروم =====
+async function connectToVoiceChannel(channel) {
+  if (!channel || !channel.guild) return null;
+
   try {
-
-    // لو ما تغيرت القناة
-    if (oldState.channelId === newState.channelId) return;
-
-    // تجاهل البوتات
-    if (newState.member?.user?.bot) return;
-
-    // تأكد أنه دخل الروم المحدد
-    if (newState.channelId !== TARGET_VOICE_CHANNEL_ID) return;
-
-    // منع التكرار
-    if (isPlaying) return;
-    isPlaying = true;
-
-    const channel = newState.channel;
-
     const connection = joinVoiceChannel({
       channelId: channel.id,
       guildId: channel.guild.id,
       adapterCreator: channel.guild.voiceAdapterCreator,
-      selfDeaf: false
+      selfDeaf: false,
+      selfMute: false,
     });
 
-    try {
-      await entersState(connection, VoiceConnectionStatus.Ready, 15000);
-    } catch (error) {
-      console.error("Voice connection error:", error);
-      connection.destroy();
-      isPlaying = false;
-      return;
+    await entersState(connection, VoiceConnectionStatus.Ready, 15000);
+
+    if (!audioPlayer) {
+      audioPlayer = createAudioPlayer({
+        behaviors: {
+          noSubscriber: NoSubscriberBehavior.Play,
+        },
+      });
     }
 
-    const player = createAudioPlayer({
-      behaviors: {
-        noSubscriber: NoSubscriberBehavior.Play
-      }
-    });
+    connection.subscribe(audioPlayer);
+    voiceConnection = connection;
+
+    console.log("✅ Bot joined voice channel");
+    return connection;
+  } catch (error) {
+    console.error("❌ Voice connection error:", error);
+    return null;
+  }
+}
+
+// ===== تشغيل الصوت من البداية =====
+function playWelcomeSound() {
+  try {
+    if (!audioPlayer) return;
 
     const resource = createAudioResource(AUDIO_FILE);
+    audioPlayer.stop(true); // يوقف أي صوت شغال ويعيد من البداية
+    audioPlayer.play(resource);
 
-    connection.subscribe(player);
-    player.play(resource);
+    console.log("🔊 Welcome sound started from beginning");
+  } catch (error) {
+    console.error("❌ Play sound error:", error);
+  }
+}
 
-    console.log("🔊 Playing welcome sound");
+client.once("ready", async () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
 
-    player.on(AudioPlayerStatus.Idle, () => {
-      setTimeout(() => {
-        connection.destroy();
-        isPlaying = false;
-      }, 1000);
-    });
-
-    player.on("error", (error) => {
-      console.error("Player error:", error);
-      connection.destroy();
-      isPlaying = false;
-    });
-
-  } catch (err) {
-    console.error("voiceStateUpdate error:", err);
-    isPlaying = false;
+  try {
+    for (const [, guild] of client.guilds.cache) {
+      const channel = guild.channels.cache.get(TARGET_VOICE_CHANNEL_ID);
+      if (channel && channel.isVoiceBased()) {
+        await connectToVoiceChannel(channel);
+        break;
+      }
+    }
+  } catch (error) {
+    console.error("❌ Ready connect error:", error);
   }
 });
 
-// ===== تشغيل البوت =====
+// ===== إذا صار فصل من الروم يرجع يدخل =====
+client.on("voiceStateUpdate", async (oldState, newState) => {
+  try {
+    // لو دخل شخص جديد للروم المحدد
+    if (
+      newState.channelId === TARGET_VOICE_CHANNEL_ID &&
+      oldState.channelId !== TARGET_VOICE_CHANNEL_ID &&
+      !newState.member.user.bot
+    ) {
+      if (!voiceConnection || voiceConnection.state.status !== VoiceConnectionStatus.Ready) {
+        const channel = newState.guild.channels.cache.get(TARGET_VOICE_CHANNEL_ID);
+        if (channel) {
+          await connectToVoiceChannel(channel);
+        }
+      }
+
+      playWelcomeSound();
+    }
+
+    // لو البوت نفسه طلع من الروم لأي سبب يرجع يدخل
+    if (
+      oldState.member?.id === client.user.id &&
+      oldState.channelId === TARGET_VOICE_CHANNEL_ID &&
+      newState.channelId !== TARGET_VOICE_CHANNEL_ID
+    ) {
+      const channel = oldState.guild.channels.cache.get(TARGET_VOICE_CHANNEL_ID);
+      if (channel) {
+        setTimeout(async () => {
+          await connectToVoiceChannel(channel);
+        }, 2000);
+      }
+    }
+  } catch (error) {
+    console.error("❌ voiceStateUpdate error:", error);
+  }
+});
+
+if (!audioPlayer) {
+  audioPlayer = createAudioPlayer({
+    behaviors: {
+      noSubscriber: NoSubscriberBehavior.Play,
+    },
+  });
+
+  audioPlayer.on(AudioPlayerStatus.Idle, () => {
+    console.log("⏹️ Audio finished");
+  });
+
+  audioPlayer.on("error", (error) => {
+    console.error("❌ Audio player error:", error);
+  });
+}
+
 client.login(process.env.DISCORD_TOKEN);
