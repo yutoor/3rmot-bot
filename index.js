@@ -6,124 +6,121 @@ const {
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, 
-        GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent
+        GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent,
+        GatewayIntentBits.DirectMessages,
     ],
+    partials: [Partials.Channel],
 });
 
-// --- الإعدادات ---
-const ADMIN_ROLE_ID = "1466572944166883461"; // الرتبة المسموح لها
-const BROADCAST_ROLE_ID = process.env.BROADCAST_ROLE_ID; 
+// --- إعدادات القوة ---
+const ADMIN_ROLE_ID = "1466572944166883461";
+const BROADCAST_ROLE_ID = process.env.BROADCAST_ROLE_ID;
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// لتجنب أخطاء SyntaxError في الاستضافة، نستخدم متغيرات للنصوص
-const UI_TEXT = {
-    title: "🛡️ لوحة التحكم الإدارية الكبرى",
-    desc: "# اختر العملية المطلوبة\nسيتم تنفيذ العملية هنا بشكل مخفي لا يراه غيرك.",
-    broadcast: "إعلان جماعي",
-    warn: "تحذير",
-    kick: "فصل (Kick)",
-    alert: "تنبيه خاص",
-    role: "إعطاء رتبة"
-};
-
 client.on("ready", () => {
-    console.log(`✅ ${client.user.tag} شغال بنظام الرسائل المخفية`);
+    console.log(`🔥 The Alpha Bot is Online: ${client.user.tag}`);
 });
 
-// ===================== [1] استدعاء اللوحة (مساعدة) =====================
+// ===================== [1] استدعاء اللوحة المخفية =====================
 client.on("messageCreate", async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    const content = message.content.trim();
-    if (content === "مساعدة" || content === "مساعده") {
-        
-        // التحقق من الرتبة
+    if (message.content === "مساعدة" || message.content === "مساعده") {
         if (!message.member.roles.cache.has(ADMIN_ROLE_ID)) return;
 
-        // حذف رسالة "مساعدة" فوراً لنظافة الشات
-        setTimeout(() => message.delete().catch(() => null), 500);
+        setTimeout(() => message.delete().catch(() => null), 200);
 
         const mainEmbed = new EmbedBuilder()
-            .setColor(0x2b2d31)
-            .setTitle(UI_TEXT.title)
-            .setDescription(UI_TEXT.desc)
-            .setImage("https://i.imgur.com/your-image-id.png"); // يمكنك وضع رابط الصورة اللي في اللوحة
+            .setColor(0x000000)
+            .setTitle("🛡️ غرفة العمليات السرية")
+            .setDescription("# نظام التحكم الشبح نشط\nاستخدم الأوامر أدناه. جميع الردود ستكون مخفية عن الأعضاء.")
+            .setThumbnail(client.user.displayAvatarURL())
+            .setImage("https://i.imgur.com/3607a7.png"); // رابط لوحة التحكم حقك
 
         const row1 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('btn_broadcast').setLabel(UI_TEXT.broadcast).setStyle(ButtonStyle.Success).setEmoji('📢'),
-            new ButtonBuilder().setCustomId('btn_warn').setLabel(UI_TEXT.warn).setStyle(ButtonStyle.Danger).setEmoji('⚠️'),
-            new ButtonBuilder().setCustomId('btn_kick').setLabel(UI_TEXT.kick).setStyle(ButtonStyle.Danger).setEmoji('👢')
+            new ButtonBuilder().setCustomId('go_broadcast').setLabel('إعلان جماعي').setStyle(ButtonStyle.Success).setEmoji('📢'),
+            new ButtonBuilder().setCustomId('go_warn').setLabel('تحذير').setStyle(ButtonStyle.Danger).setEmoji('⚠️'),
+            new ButtonBuilder().setCustomId('go_kick').setLabel('فصل (Kick)').setStyle(ButtonStyle.Danger).setEmoji('👢')
         );
 
         const row2 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('btn_alert').setLabel(UI_TEXT.alert).setStyle(ButtonStyle.Primary).setEmoji('🔔'),
-            new ButtonBuilder().setCustomId('btn_role').setLabel(UI_TEXT.role).setStyle(ButtonStyle.Secondary).setEmoji('🎖️')
+            new ButtonBuilder().setCustomId('go_alert').setLabel('تنبيه خاص').setStyle(ButtonStyle.Primary).setEmoji('🔔'),
+            new ButtonBuilder().setCustomId('go_role').setLabel('إعطاء رتبة').setStyle(ButtonStyle.Secondary).setEmoji('🎖️')
         );
 
-        // إرسال اللوحة (هذه الرسالة فقط تكون ظاهرة للمشرف)
         await message.channel.send({ embeds: [mainEmbed], components: [row1, row2] });
     }
 });
 
-// ===================== [2] معالجة الأزرار بنظام Ephemeral =====================
+// ===================== [2] معالجة التفاعل المخفي (Ephemeral) =====================
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isButton()) return;
     if (!interaction.member.roles.cache.has(ADMIN_ROLE_ID)) return;
 
-    // الرد المخفي (لا يراه أحد غيرك)
     const op = interaction.customId;
+    let responseText = "";
 
-    if (op === 'btn_broadcast') {
-        return interaction.reply({ 
-            content: "📢 **للإعلان الجماعي:** يرجى كتابة الأمر التالي في الشات:\n`!اعلان [نص الإعلان]`\n(لا تقلق، البوت سيحذف رسالتك فوراً ويرسل الإعلان بشكل فخم للجميع في الخاص).", 
-            ephemeral: true 
-        });
-    }
+    if (op === 'go_broadcast') responseText = "📢 **للإعلان:** اكتب `!اعلان [نصك]`";
+    if (op === 'go_warn') responseText = "⚠️ **للتحذير:** اكتب `!تحذير @العضو [السبب]`";
+    if (op === 'go_kick') responseText = "👢 **للصل:** اكتب `!فصل @العضو [السبب]`";
+    if (op === 'go_alert') responseText = "🔔 **للتنبيه:** اكتب `!تنبيه @العضو [الرسالة]`";
+    if (op === 'go_role') responseText = "🎖️ **للرتبة:** اكتب `!رتبة @العضو [آيدي الرتبة]`";
 
-    if (op === 'btn_kick') {
-        return interaction.reply({ 
-            content: "👢 **للفصل:** اكتب في الشات:\n`!فصل @العضو [السبب]`\nسيتم حذف رسالتك وتنفيذ الأمر مخفياً.", 
-            ephemeral: true 
-        });
-    }
-
-    // يمكنك إضافة باقي الأزرار بنفس الطريقة
-    await interaction.reply({ content: "هذه الميزة تحت البرمجة حالياً بنفس النظام المخفي.", ephemeral: true });
+    await interaction.reply({ content: `### ${responseText}\n*سيتم حذف رسالتك فوراً بعد الإرسال للحفاظ على السرية.*`, ephemeral: true });
 });
 
-// ===================== [3] تنفيذ الأوامر مع الحذف التلقائي =====================
+// ===================== [3] تنفيذ الأوامر "الشبح" =====================
 client.on("messageCreate", async (message) => {
-    if (message.author.bot || !message.guild) return;
-    if (!message.member.roles.cache.has(ADMIN_ROLE_ID)) return;
+    if (message.author.bot || !message.guild || !message.member.roles.cache.has(ADMIN_ROLE_ID)) return;
 
     const args = message.content.split(" ");
-    const command = args[0].toLowerCase();
+    const cmd = args[0];
 
-    // أمر الإعلان الجماعي
-    if (command === "!اعلان") {
+    // --- الإعلان الجماعي ---
+    if (cmd === "!اعلان") {
         setTimeout(() => message.delete().catch(() => null), 100);
         const text = args.slice(1).join(" ");
-        if (!text) return;
-
         const role = await message.guild.roles.fetch(BROADCAST_ROLE_ID).catch(() => null);
         const targets = role ? role.members.filter(m => !m.user.bot) : [];
 
         for (const [, target] of targets) {
-            await target.send(`# 📢 إعلان هـام\n━━━━━━━━━━━━━\n${text}\n━━━━━━━━━━━━━`).catch(() => null);
-            await wait(10000); // فاصل 10 ثوانٍ للأمان
+            await target.send(`# 📢 إعلان من الإدارة\n━━━━━━━━━━━━━\n${text}`).catch(() => null);
+            await wait(10000);
+        }
+        await message.author.send(`✅ تم الإعلان لـ ${targets.size} عضو.`);
+    }
+
+    // --- التحذير ---
+    if (cmd === "!تحذير") {
+        setTimeout(() => message.delete().catch(() => null), 100);
+        const member = message.mentions.members.first();
+        const reason = args.slice(2).join(" ") || "سلوك غير لائق";
+        if (member) {
+            await member.send(`# ⚠️ تحذير رسمي\nتم تسجيل تحذير ضدك.\n**السبب:** ${reason}`).catch(() => null);
+            await message.author.send(`✅ تم تحذير ${member.user.tag}`);
         }
     }
 
-    // أمر الفصل Kick
-    if (command === "!فصل") {
+    // --- الفصل ---
+    if (cmd === "!فصل") {
         setTimeout(() => message.delete().catch(() => null), 100);
         const member = message.mentions.members.first();
-        const reason = args.slice(2).join(" ") || "بدون سبب";
-        
+        const reason = args.slice(2).join(" ") || "مخالفة القوانين";
         if (member) {
-            await member.send(`# 👢 تم فصلك\n**السبب:** ${reason}`).catch(() => null);
+            await member.send(`# 👢 قرار فصل\nتم فصلك من السيرفر.\n**السبب:** ${reason}`).catch(() => null);
             await member.kick(reason).catch(() => null);
+            await message.author.send(`✅ تم فصل ${member.user.tag}`);
         }
+    }
+});
+
+// ===================== [4] نظام الـ AI في الخاص =====================
+client.on("messageCreate", async (message) => {
+    if (message.guild || message.author.bot) return;
+    
+    // إذا كان العضو ليس آدمن، البوت يرد بذكاء اصطناعي
+    if (message.author.id !== "آيدي_حسابك_هنا") {
+        return message.reply("مرحباً! أنا المساعد الذكي الخاص بالسيرفر 🤖. طلباتك قيد المعالجة، يرجى الانتظار أو التواصل مع الدعم الفني.");
     }
 });
 
