@@ -1,126 +1,108 @@
 const { 
     Client, GatewayIntentBits, Partials, EmbedBuilder, 
-    ActionRowBuilder, ButtonBuilder, ButtonStyle 
+    ActionRowBuilder, ButtonBuilder, ButtonStyle,
+    ModalBuilder, TextInputBuilder, TextInputStyle, InteractionType
 } = require("discord.js");
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, 
-        GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent
     ],
-    partials: [Partials.Channel],
 });
 
-// --- إعدادات القوة ---
-const ADMIN_ROLE_ID = "1466572944166883461";
-const BROADCAST_ROLE_ID = process.env.BROADCAST_ROLE_ID;
+// --- الإعدادات ---
+const ADMIN_ROLE_ID = "1466572944166883461"; 
+const BROADCAST_ROLE_ID = process.env.BROADCAST_ROLE_ID; 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 client.on("ready", () => {
-    console.log(`🔥 The Alpha Bot is Online: ${client.user.tag}`);
+    console.log(`🚀 نظام النوافذ المنبثقة جاهز: ${client.user.tag}`);
 });
 
-// ===================== [1] استدعاء اللوحة المخفية =====================
+// ===================== [1] استدعاء اللوحة الرئيسية =====================
 client.on("messageCreate", async (message) => {
     if (message.author.bot || !message.guild) return;
 
     if (message.content === "مساعدة" || message.content === "مساعده") {
         if (!message.member.roles.cache.has(ADMIN_ROLE_ID)) return;
-
         setTimeout(() => message.delete().catch(() => null), 200);
 
         const mainEmbed = new EmbedBuilder()
-            .setColor(0x000000)
-            .setTitle("🛡️ غرفة العمليات السرية")
-            .setDescription("# نظام التحكم الشبح نشط\nاستخدم الأوامر أدناه. جميع الردود ستكون مخفية عن الأعضاء.")
-            .setThumbnail(client.user.displayAvatarURL())
-            .setImage("https://i.imgur.com/3607a7.png"); // رابط لوحة التحكم حقك
+            .setColor(0x2b2d31)
+            .setTitle("🛡️ لوحة التحكم التفاعلية")
+            .setDescription("# اختر العملية المطلوبة\nعند الضغط على الزر ستظهر لك نافذة لتعبئة البيانات.")
+            .setImage("https://i.imgur.com/3607a7.png"); 
 
         const row1 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('go_broadcast').setLabel('إعلان جماعي').setStyle(ButtonStyle.Success).setEmoji('📢'),
-            new ButtonBuilder().setCustomId('go_warn').setLabel('تحذير').setStyle(ButtonStyle.Danger).setEmoji('⚠️'),
-            new ButtonBuilder().setCustomId('go_kick').setLabel('فصل (Kick)').setStyle(ButtonStyle.Danger).setEmoji('👢')
+            new ButtonBuilder().setCustomId('modal_broadcast').setLabel('إعلان جماعي').setStyle(ButtonStyle.Success).setEmoji('📢'),
+            new ButtonBuilder().setCustomId('modal_kick').setLabel('فصل (Kick)').setStyle(ButtonStyle.Danger).setEmoji('👢')
         );
 
-        const row2 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('go_alert').setLabel('تنبيه خاص').setStyle(ButtonStyle.Primary).setEmoji('🔔'),
-            new ButtonBuilder().setCustomId('go_role').setLabel('إعطاء رتبة').setStyle(ButtonStyle.Secondary).setEmoji('🎖️')
-        );
-
-        await message.channel.send({ embeds: [mainEmbed], components: [row1, row2] });
+        await message.channel.send({ embeds: [mainEmbed], components: [row1] });
     }
 });
 
-// ===================== [2] معالجة التفاعل المخفي (Ephemeral) =====================
+// ===================== [2] فتح النوافذ المنبثقة (Modals) =====================
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isButton()) return;
     if (!interaction.member.roles.cache.has(ADMIN_ROLE_ID)) return;
 
-    const op = interaction.customId;
-    let responseText = "";
+    // نافذة الإعلان الجماعي
+    if (interaction.customId === 'modal_broadcast') {
+        const modal = new ModalBuilder().setCustomId('broadcast_modal').setTitle('إرسال إعلان للجميع');
+        const textInput = new TextInputBuilder()
+            .setCustomId('broadcast_text')
+            .setLabel("نص الإعلان")
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder('اكتب هنا ما تريد نشره في الخاص للجميع...')
+            .setRequired(true);
 
-    if (op === 'go_broadcast') responseText = "📢 **للإعلان:** اكتب `!اعلان [نصك]`";
-    if (op === 'go_warn') responseText = "⚠️ **للتحذير:** اكتب `!تحذير @العضو [السبب]`";
-    if (op === 'go_kick') responseText = "👢 **للصل:** اكتب `!فصل @العضو [السبب]`";
-    if (op === 'go_alert') responseText = "🔔 **للتنبيه:** اكتب `!تنبيه @العضو [الرسالة]`";
-    if (op === 'go_role') responseText = "🎖️ **للرتبة:** اكتب `!رتبة @العضو [آيدي الرتبة]`";
+        modal.addComponents(new ActionRowBuilder().addComponents(textInput));
+        await interaction.showModal(modal);
+    }
 
-    await interaction.reply({ content: `### ${responseText}\n*سيتم حذف رسالتك فوراً بعد الإرسال للحفاظ على السرية.*`, ephemeral: true });
+    // نافذة الفصل
+    if (interaction.customId === 'modal_kick') {
+        const modal = new ModalBuilder().setCustomId('kick_modal').setTitle('فصل عضو من السيرفر');
+        const idInput = new TextInputBuilder().setCustomId('user_id').setLabel("آيدي العضو").setStyle(TextInputStyle.Short).setRequired(true);
+        const reasonInput = new TextInputBuilder().setCustomId('kick_reason').setLabel("السبب").setStyle(TextInputStyle.Paragraph).setRequired(false);
+
+        modal.addComponents(new ActionRowBuilder().addComponents(idInput), new ActionRowBuilder().addComponents(reasonInput));
+        await interaction.showModal(modal);
+    }
 });
 
-// ===================== [3] تنفيذ الأوامر "الشبح" =====================
-client.on("messageCreate", async (message) => {
-    if (message.author.bot || !message.guild || !message.member.roles.cache.has(ADMIN_ROLE_ID)) return;
+// ===================== [3] معالجة البيانات المرسلة من النوافذ =====================
+client.on("interactionCreate", async (interaction) => {
+    if (interaction.type !== InteractionType.ModalSubmit) return;
 
-    const args = message.content.split(" ");
-    const cmd = args[0];
+    // تنفيذ الإعلان
+    if (interaction.customId === 'broadcast_modal') {
+        const text = interaction.fields.getTextInputValue('broadcast_text');
+        await interaction.reply({ content: `⏳ جاري بدء الإرسال لجميع الأعضاء بفاصل 10 ثوانٍ...`, ephemeral: true });
 
-    // --- الإعلان الجماعي ---
-    if (cmd === "!اعلان") {
-        setTimeout(() => message.delete().catch(() => null), 100);
-        const text = args.slice(1).join(" ");
-        const role = await message.guild.roles.fetch(BROADCAST_ROLE_ID).catch(() => null);
+        const role = await interaction.guild.roles.fetch(BROADCAST_ROLE_ID).catch(() => null);
         const targets = role ? role.members.filter(m => !m.user.bot) : [];
 
         for (const [, target] of targets) {
-            await target.send(`# 📢 إعلان من الإدارة\n━━━━━━━━━━━━━\n${text}`).catch(() => null);
+            await target.send(`# 📢 إعلان هـام\n━━━━━━━━━━━━━\n${text}`).catch(() => null);
             await wait(10000);
         }
-        await message.author.send(`✅ تم الإعلان لـ ${targets.size} عضو.`);
+        await interaction.followUp({ content: `✅ تم الانتهاء من الإرسال لـ ${targets.size} عضو.`, ephemeral: true });
     }
 
-    // --- التحذير ---
-    if (cmd === "!تحذير") {
-        setTimeout(() => message.delete().catch(() => null), 100);
-        const member = message.mentions.members.first();
-        const reason = args.slice(2).join(" ") || "سلوك غير لائق";
-        if (member) {
-            await member.send(`# ⚠️ تحذير رسمي\nتم تسجيل تحذير ضدك.\n**السبب:** ${reason}`).catch(() => null);
-            await message.author.send(`✅ تم تحذير ${member.user.tag}`);
-        }
-    }
+    // تنفيذ الفصل
+    if (interaction.customId === 'kick_modal') {
+        const userId = interaction.fields.getTextInputValue('user_id');
+        const reason = interaction.fields.getTextInputValue('kick_reason') || "مخالفة القوانين";
+        
+        const member = await interaction.guild.members.fetch(userId).catch(() => null);
+        if (!member) return interaction.reply({ content: "❌ لم يتم العثور على العضو.", ephemeral: true });
 
-    // --- الفصل ---
-    if (cmd === "!فصل") {
-        setTimeout(() => message.delete().catch(() => null), 100);
-        const member = message.mentions.members.first();
-        const reason = args.slice(2).join(" ") || "مخالفة القوانين";
-        if (member) {
-            await member.send(`# 👢 قرار فصل\nتم فصلك من السيرفر.\n**السبب:** ${reason}`).catch(() => null);
-            await member.kick(reason).catch(() => null);
-            await message.author.send(`✅ تم فصل ${member.user.tag}`);
-        }
-    }
-});
-
-// ===================== [4] نظام الـ AI في الخاص =====================
-client.on("messageCreate", async (message) => {
-    if (message.guild || message.author.bot) return;
-    
-    // إذا كان العضو ليس آدمن، البوت يرد بذكاء اصطناعي
-    if (message.author.id !== "آيدي_حسابك_هنا") {
-        return message.reply("مرحباً! أنا المساعد الذكي الخاص بالسيرفر 🤖. طلباتك قيد المعالجة، يرجى الانتظار أو التواصل مع الدعم الفني.");
+        await member.send(`# 👢 قرار فصل\n**السبب:** ${reason}`).catch(() => null);
+        await member.kick(reason);
+        await interaction.reply({ content: `✅ تم فصل ${member.user.tag} بنجاح.`, ephemeral: true });
     }
 });
 
