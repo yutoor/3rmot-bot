@@ -3,7 +3,7 @@ const {
     ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, 
     TextInputStyle, InteractionType 
 } = require("discord.js");
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, NoSubscriberBehavior } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, NoSubscriberBehavior, AudioPlayerStatus } = require('@discordjs/voice');
 const path = require('path');
 
 const client = new Client({
@@ -14,12 +14,12 @@ const client = new Client({
     ],
 });
 
-// --- [ الإعدادات ] ---
+// --- [ الإعدادات الثابتة ] ---
 const ADMIN_ROLE_ID = "1466572944166883461"; 
 const SUPPORT_VC_ID = "1466581684290850984"; 
 const moonImage = "https://images.unsplash.com/photo-1532767153582-b1a0e5145009?q=80&w=1000"; 
 
-// دالة دخول الروم (تأكد من selfDeaf: false لفتح الصوت)
+// دالة دخول الروم مع فتح السماعة (selfDeaf: false)
 function connectToSupportVC(guild) {
     const channel = guild.channels.cache.get(SUPPORT_VC_ID);
     if (channel) {
@@ -27,7 +27,7 @@ function connectToSupportVC(guild) {
             channelId: channel.id,
             guildId: guild.id,
             adapterCreator: guild.voiceAdapterCreator,
-            selfDeaf: false, // لفتح السماعة
+            selfDeaf: false, 
             selfMute: false
         });
     }
@@ -40,10 +40,10 @@ client.on("ready", () => {
 
 // --- [ نظام الترحيب الصوتي الفوري ] ---
 client.on("voiceStateUpdate", async (oldState, newState) => {
-    // رصد دخول عضو جديد (ليس بوت)
+    // رصد دخول عضو جديد (ليس بوت) للروم
     if (newState.channelId === SUPPORT_VC_ID && !newState.member.user.bot && oldState.channelId !== newState.channelId) {
         
-        console.log(`📢 جاري الترحيب بالعضو: ${newState.member.user.tag}`);
+        console.log(`📢 جاري محاولة تشغيل الصوت لـ: ${newState.member.user.tag}`);
 
         const connection = connectToSupportVC(newState.guild);
         if (connection) {
@@ -51,15 +51,16 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
                 behaviors: { noSubscriber: NoSubscriberBehavior.Play }
             });
             
-            // قراءة ملف 3rmot_welcome.mp3 مع رفع الصوت
-            const audioPath = path.join(__dirname, '3rmot_welcome.mp3');
+            // تحديد المسار بدقة لبيئة Linux في الاستضافة
+            const audioPath = path.resolve(__dirname, '3rmot_welcome.mp3');
             const resource = createAudioResource(audioPath, { inlineVolume: true }); 
-            resource.volume.setVolume(1.0); // 100% Volume
+            resource.volume.setVolume(1.0); 
 
             player.play(resource);
             connection.subscribe(player);
             
-            player.on('error', error => console.error(`❌ خطأ صوتي: ${error.message}`));
+            player.on('error', error => console.error(`❌ خطأ في التشغيل: ${error.message}`));
+            player.on(AudioPlayerStatus.Playing, () => console.log('🎵 المقطع يشتغل الآن!'));
         }
     }
 });
@@ -71,8 +72,8 @@ client.on("messageCreate", async (message) => {
 
     const mainEmbed = new EmbedBuilder()
         .setColor(0x000000)
-        .setTitle("🛡️ لوحة التحكم الإدارية الكبرى")
-        .setDescription("# نظام 3RMOT الصوتي\nتم تحديث الكود لفتح قنوات الصوت إجبارياً.")
+        .setTitle("🛡️ لوحة التحكم الإدارية")
+        .setDescription("# نظام 3RMOT الصوتي\nتم تحديث المسارات وفك تشفير الصوت.")
         .setImage(moonImage);
 
     const row1 = new ActionRowBuilder().addComponents(
@@ -95,7 +96,7 @@ client.on("interactionCreate", async (interaction) => {
     if (!interaction.guild || !interaction.member.roles.cache.has(ADMIN_ROLE_ID)) return;
     if (interaction.isButton() && interaction.customId === 'btn_reconnect_vc') {
         connectToSupportVC(interaction.guild);
-        await interaction.reply({ content: "✅ تم إعادة مزامنة الصوت وفتح السماعة!", ephemeral: true });
+        await interaction.reply({ content: "✅ تم تحديث حالة الاتصال الصوتي!", ephemeral: true });
     }
 });
 
