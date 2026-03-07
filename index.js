@@ -12,7 +12,6 @@ const {
   PermissionsBitField,
 } = require("discord.js");
 
-const path = require("path");
 const {
   joinVoiceChannel,
   createAudioPlayer,
@@ -21,7 +20,11 @@ const {
   NoSubscriberBehavior,
   entersState,
   VoiceConnectionStatus,
+  StreamType,
 } = require("@discordjs/voice");
+
+const prism = require("prism-media");
+const ffmpegPath = require("ffmpeg-static");
 
 const client = new Client({
   intents: [
