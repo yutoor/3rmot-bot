@@ -4,10 +4,14 @@ const {
   createAudioPlayer,
   createAudioResource,
   AudioPlayerStatus,
+  NoSubscriberBehavior,
   entersState,
   VoiceConnectionStatus,
-  NoSubscriberBehavior,
+  StreamType,
 } = require("@discordjs/voice");
+
+const prism = require("prism-media");
+const ffmpegPath = require("ffmpeg-static");
 const path = require("path");
 const fs = require("fs");
 
@@ -25,8 +29,9 @@ const AUDIO_FILE = path.join(__dirname, "3rmot_welcome.wav");
 let connection = null;
 let player = null;
 
-async function connectToTargetChannel(guild) {
+async function connectToVoiceChannel(guild) {
   const channel = guild.channels.cache.get(TARGET_VOICE_CHANNEL_ID);
+
   if (!channel || !channel.isVoiceBased()) {
     console.log("❌ الروم الصوتي غير موجود أو ليس روم صوتي");
     return;
@@ -50,25 +55,27 @@ async function connectToTargetChannel(guild) {
     return;
   }
 
-  player = createAudioPlayer({
-    behaviors: {
-      noSubscriber: NoSubscriberBehavior.Play,
-    },
-  });
+  if (!player) {
+    player = createAudioPlayer({
+      behaviors: {
+        noSubscriber: NoSubscriberBehavior.Play,
+      },
+    });
+
+    player.on(AudioPlayerStatus.Playing, () => {
+      console.log("🔊 الصوت اشتغل");
+    });
+
+    player.on(AudioPlayerStatus.Idle, () => {
+      console.log("⏹️ انتهى الصوت");
+    });
+
+    player.on("error", (error) => {
+      console.error("❌ خطأ في الصوت:", error);
+    });
+  }
 
   connection.subscribe(player);
-
-  player.on(AudioPlayerStatus.Playing, () => {
-    console.log("🔊 الصوت اشتغل");
-  });
-
-  player.on(AudioPlayerStatus.Idle, () => {
-    console.log("⏹️ انتهى الصوت");
-  });
-
-  player.on("error", (error) => {
-    console.error("❌ خطأ في الصوت:", error);
-  });
 }
 
 function playWelcome() {
@@ -82,20 +89,45 @@ function playWelcome() {
     return;
   }
 
-  const resource = createAudioResource(AUDIO_FILE);
-  player.stop();
+  if (!ffmpegPath) {
+    console.log("❌ ffmpeg-static غير موجود");
+    return;
+  }
+
+  const transcoder = new prism.FFmpeg({
+    args: [
+      "-analyzeduration", "0",
+      "-loglevel", "0",
+      "-i", AUDIO_FILE,
+      "-f", "s16le",
+      "-ar", "48000",
+      "-ac", "2",
+    ],
+    shell: false,
+    executable: ffmpegPath,
+  });
+
+  const resource = createAudioResource(transcoder, {
+    inputType: StreamType.Raw,
+  });
+
+  player.stop(true);
   player.play(resource);
 }
 
 client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log("Audio file path:", AUDIO_FILE);
+  console.log("Audio exists:", fs.existsSync(AUDIO_FILE));
+  console.log("ffmpeg path:", ffmpegPath);
+
   const guild = client.guilds.cache.first();
   if (!guild) {
     console.log("❌ ما لقيت سيرفر");
     return;
   }
 
-  await connectToTargetChannel(guild);
+  await connectToVoiceChannel(guild);
 });
 
 client.on("voiceStateUpdate", async (oldState, newState) => {
@@ -110,25 +142,13 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
       console.log(`👤 دخل عضو جديد: ${newState.member.user.tag}`);
 
       if (!connection || connection.state.status !== VoiceConnectionStatus.Ready) {
-        await connectToTargetChannel(newState.guild);
+        await connectToVoiceChannel(newState.guild);
       }
 
       playWelcome();
     }
-
-    const botMovedOut =
-      oldState.member?.id === client.user.id &&
-      oldState.channelId === TARGET_VOICE_CHANNEL_ID &&
-      newState.channelId !== TARGET_VOICE_CHANNEL_ID;
-
-    if (botMovedOut) {
-      console.log("⚠️ البوت طلع من الروم، بيرجع يدخل");
-      setTimeout(async () => {
-        await connectToTargetChannel(oldState.guild);
-      }, 2000);
-    }
   } catch (err) {
-    console.error("❌ خطأ voiceStateUpdate:", err);
+    console.error("❌ voiceStateUpdate error:", err);
   }
 });
 
