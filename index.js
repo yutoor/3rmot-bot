@@ -12,9 +12,8 @@ const {
 const path = require("path");
 const fs = require("fs");
 
-// ===== الإعدادات =====
 const VOICE_CHANNEL_ID = "1466581684290850984";
-const AUDIO_FILE = path.join(__dirname, "3rmot_welcome.mp3");
+const AUDIO_FILE = path.join(__dirname, "3rmot_welcome.wav");
 
 const client = new Client({
   intents: [
@@ -67,9 +66,7 @@ async function connectToVoice(guild) {
 
     let connection = getVoiceConnection(guild.id);
 
-    if (connection) {
-      return connection;
-    }
+    if (connection) return connection;
 
     connection = joinVoiceChannel({
       channelId: channel.id,
@@ -80,12 +77,10 @@ async function connectToVoice(guild) {
     });
 
     await entersState(connection, VoiceConnectionStatus.Ready, 15000);
-
     connection.subscribe(getPlayer());
     currentGuildId = guild.id;
 
     console.log("✅ البوت دخل الروم الصوتي");
-
     return connection;
   } catch (error) {
     console.error("❌ خطأ دخول الروم:", error);
@@ -95,8 +90,11 @@ async function connectToVoice(guild) {
 
 function playWelcome() {
   try {
+    console.log("📁 Audio path:", AUDIO_FILE);
+    console.log("📁 Audio exists:", fs.existsSync(AUDIO_FILE));
+
     if (!fs.existsSync(AUDIO_FILE)) {
-      console.log("❌ ملف الصوت غير موجود:", AUDIO_FILE);
+      console.log("❌ ملف الصوت غير موجود");
       return;
     }
 
@@ -131,8 +129,6 @@ async function keepBotInVoice() {
 
 client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
-  console.log("📁 Audio path:", AUDIO_FILE);
-  console.log("📁 Audio exists:", fs.existsSync(AUDIO_FILE));
 
   const guild = client.guilds.cache.first();
   if (!guild) {
