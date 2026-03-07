@@ -5,8 +5,10 @@ const {
   createAudioResource,
   entersState,
   VoiceConnectionStatus,
+  AudioPlayerStatus,
+  NoSubscriberBehavior,
   getVoiceConnection,
-  StreamType
+  StreamType,
 } = require("@discordjs/voice");
 
 const path = require("path");
@@ -16,10 +18,7 @@ const VOICE_CHANNEL_ID = "1466581684290850984";
 const AUDIO_FILE = path.join(__dirname, "3rmot_welcome.ogg");
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates
-  ]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
 });
 
 let player;
@@ -27,21 +26,54 @@ let player;
 function getPlayer() {
   if (player) return player;
 
-  player = createAudioPlayer();
+  player = createAudioPlayer({
+    behaviors: {
+      noSubscriber: NoSubscriberBehavior.Play,
+    },
+  });
 
   player.on("error", (error) => {
-    console.log("Audio Error:", error);
+    console.error("Audio Player Error:", error.message);
+  });
+
+  player.on(AudioPlayerStatus.Playing, () => {
+    console.log("الصوت اشتغل");
+  });
+
+  player.on(AudioPlayerStatus.Idle, () => {
+    console.log("انتهى الصوت، إعادة التشغيل...");
+    playLoop();
   });
 
   return player;
 }
 
-async function joinVoice(guild) {
+function createTrack() {
+  if (!fs.existsSync(AUDIO_FILE)) {
+    console.log("ملف الصوت غير موجود:", AUDIO_FILE);
+    return null;
+  }
 
+  return createAudioResource(AUDIO_FILE, {
+    inputType: StreamType.OggOpus,
+  });
+}
+
+function playLoop() {
+  const p = getPlayer();
+  const resource = createTrack();
+
+  if (!resource) return;
+
+  p.play(resource);
+}
+
+async function joinVoice(guild) {
   const channel = guild.channels.cache.get(VOICE_CHANNEL_ID);
+
   if (!channel) {
     console.log("الروم الصوتي غير موجود");
-    return;
+    return null;
   }
 
   let connection = getVoiceConnection(guild.id);
@@ -51,72 +83,75 @@ async function joinVoice(guild) {
       channelId: VOICE_CHANNEL_ID,
       guildId: guild.id,
       adapterCreator: guild.voiceAdapterCreator,
-      selfDeaf: false
+      selfDeaf: false,
+      selfMute: false,
     });
-
-    await entersState(connection, VoiceConnectionStatus.Ready, 20000);
-
-    connection.subscribe(getPlayer());
-
-    console.log("البوت دخل الصوتية");
   }
 
-  return connection;
+  connection.on("stateChange", async (_, newState) => {
+    if (newState.status === VoiceConnectionStatus.Disconnected) {
+      console.log("انقطع الاتصال، جاري محاولة الرجوع...");
+      try {
+        await entersState(connection, VoiceConnectionStatus.Signalling, 5000);
+      } catch {
+        try {
+          connection.destroy();
+        } catch {}
+      }
+    }
+  });
+
+  try {
+    await entersState(connection, VoiceConnectionStatus.Ready, 20000);
+    connection.subscribe(getPlayer());
+    console.log("البوت دخل الروم الصوتي");
+    return connection;
+  } catch (error) {
+    console.error("فشل دخول الروم الصوتي:", error.message);
+    try {
+      connection.destroy();
+    } catch {}
+    return null;
+  }
 }
 
-function playSound() {
-
-  if (!fs.existsSync(AUDIO_FILE)) {
-    console.log("ملف الصوت غير موجود");
+async function start24_7Player() {
+  const guild = client.guilds.cache.first();
+  if (!guild) {
+    console.log("ما لقيت سيرفر");
     return;
   }
 
-  const resource = createAudioResource(AUDIO_FILE, {
-    inputType: StreamType.OggOpus
-  });
+  const connection = await joinVoice(guild);
+  if (!connection) return;
 
   const p = getPlayer();
+  connection.subscribe(p);
 
-  p.stop();
-  p.play(resource);
+  if (!fs.existsSync(AUDIO_FILE)) {
+    console.log("ملف الصوت غير موجود:", AUDIO_FILE);
+    return;
+  }
 
-  console.log("تم تشغيل الصوت");
+  playLoop();
 }
 
 client.once("ready", async () => {
-
   console.log(`Logged in as ${client.user.tag}`);
+  console.log("مسار الملف:", AUDIO_FILE);
+  console.log("هل الملف موجود؟", fs.existsSync(AUDIO_FILE));
 
-  const guild = client.guilds.cache.first();
-  if (!guild) return;
-
-  await joinVoice(guild);
-
+  await start24_7Player();
 });
 
-client.on("voiceStateUpdate", async (oldState, newState) => {
+client.on("voiceStateUpdate", async (_, newState) => {
+  if (!newState.guild) return;
 
-  if (!newState.member || newState.member.user.bot) return;
-
-  if (
-    oldState.channelId !== VOICE_CHANNEL_ID &&
-    newState.channelId === VOICE_CHANNEL_ID
-  ) {
-
-    console.log("دخل عضو جديد");
-
-    let connection = getVoiceConnection(newState.guild.id);
-
-    if (!connection) {
-      connection = await joinVoice(newState.guild);
-    }
-
-    if (connection) {
-      playSound();
-    }
-
+  const connection = getVoiceConnection(newState.guild.id);
+  if (!connection) {
+    console.log("ما فيه اتصال صوتي، محاولة إعادة الدخول...");
+    await start24_7Player();
   }
-
 });
 
 client.login(process.env.DISCORD_TOKEN);
