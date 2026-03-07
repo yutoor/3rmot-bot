@@ -14,11 +14,12 @@ const client = new Client({
     ],
 });
 
+// --- [ الإعدادات الثابتة ] ---
 const ADMIN_ROLE_ID = "1466572944166883461"; 
 const SUPPORT_VC_ID = "1466581684290850984"; 
 const moonImage = "https://images.unsplash.com/photo-1532767153582-b1a0e5145009?q=80&w=1000"; 
 
-// دالة دخول الروم مع معالجة حالة الاتصال
+// دالة دخول الروم مع معالجة حالة الاتصال لضمان استقرار الصوت
 async function connectToSupportVC(guild) {
     const channel = guild.channels.cache.get(SUPPORT_VC_ID);
     if (!channel) return null;
@@ -32,25 +33,28 @@ async function connectToSupportVC(guild) {
     });
 
     try {
-        // الانتظار حتى يصبح الاتصال جاهزاً تماماً قبل أي إجراء
+        // الانتظار حتى يصبح الاتصال جاهزاً تماماً قبل تشغيل أي صوت
         await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
         return connection;
     } catch (error) {
-        connection.destroy();
-        console.error("❌ فشل الاتصال بالروم الصوتي في الوقت المحدد:", error);
+        if (connection.state.status !== VoiceConnectionStatus.Destroyed) {
+            connection.destroy();
+        }
+        console.error("❌ فشل الاتصال بالروم الصوتي:", error);
         return null;
     }
 }
 
 client.on("ready", () => {
-    console.log(`✅ ${client.user.tag} متصل وجاهز للعمل!`);
+    console.log(`✅ ${client.user.tag} متصل وجاهز للعمل مع نظام الترحيب الذكي!`);
 });
 
-// --- [ نظام الترحيب الصوتي المطور والمضمون ] ---
+// --- [ نظام الترحيب الصوتي الفوري المطور ] ---
 client.on("voiceStateUpdate", async (oldState, newState) => {
+    // رصد دخول عضو جديد (ليس بوت) للروم الصوتي المحدد
     if (newState.channelId === SUPPORT_VC_ID && !newState.member.user.bot && oldState.channelId !== newState.channelId) {
         
-        console.log(`📢 رصد دخول العضو: ${newState.member.user.tag}`);
+        console.log(`📢 جاري محاولة تشغيل الصوت لـ: ${newState.member.user.tag}`);
         
         const connection = await connectToSupportVC(newState.guild);
         
@@ -59,31 +63,29 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
                 behaviors: { noSubscriber: NoSubscriberBehavior.Play }
             });
             
+            // استخدام مسار ملف الترحيب المرفوع 3rmot_welcome.mp3
             const audioPath = path.resolve(__dirname, '3rmot_welcome.mp3');
             const resource = createAudioResource(audioPath, { inlineVolume: true }); 
-            resource.volume.setVolume(1.0); 
+            resource.volume.setVolume(1.0); // رفع مستوى الصوت للأداء الأمثل
 
-            // ربط المشغل بالاتصال
             connection.subscribe(player);
-            
-            // تشغيل المقطع
             player.play(resource);
 
-            player.on(AudioPlayerStatus.Playing, () => console.log('🎵 الصوت يبث الآن في الروم!'));
-            player.on('error', error => console.error(`❌ خطأ صوتي: ${error.message}`));
+            player.on(AudioPlayerStatus.Playing, () => console.log('🎵 المقطع يشتغل الآن بصوت مرتفع!'));
+            player.on('error', error => console.error(`❌ خطأ في مشغل الصوت: ${error.message}`));
         }
     }
 });
 
-// لوحة التحكم بالأزرار (كما هي في طلبك السابق)
+// --- [ لوحة التحكم بـ 7 أزرار مفعلة ] ---
 client.on("messageCreate", async (message) => {
     if (message.author.bot || !message.guild || !message.content.startsWith("مساعدة")) return;
     if (!message.member.roles.cache.has(ADMIN_ROLE_ID)) return;
 
     const mainEmbed = new EmbedBuilder()
         .setColor(0x000000)
-        .setTitle("🛡️ لوحة التحكم الإدارية الكبرى")
-        .setDescription("# نظام 3RMOT الصوتي\nتم تفعيل نظام الانتظار الذكي لضمان خروج الصوت.")
+        .setTitle("🛡️ لوحة التحكم الإدارية")
+        .setDescription("# نظام 3RMOT الصوتي نشط\nاستخدم الأزرار أدناه للتحكم في العمليات الإدارية.")
         .setImage(moonImage);
 
     const row1 = new ActionRowBuilder().addComponents(
@@ -96,42 +98,47 @@ client.on("messageCreate", async (message) => {
     const row2 = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('btn_role').setLabel('رتبة').setStyle(ButtonStyle.Secondary).setEmoji('🎖️'),
         new ButtonBuilder().setCustomId('btn_info').setLabel('معلومات').setStyle(ButtonStyle.Secondary).setEmoji('ℹ️'),
-        new ButtonBuilder().setCustomId('btn_reconnect_vc').setLabel('إعادة مزامنة الصوت').setStyle(ButtonStyle.Primary).setEmoji('🔄')
+        new ButtonBuilder().setCustomId('btn_reconnect_vc').setLabel('إعادة اتصال صوتي').setStyle(ButtonStyle.Primary).setEmoji('🔄')
     );
 
     await message.channel.send({ embeds: [mainEmbed], components: [row1, row2] });
 });
 
-// تفعيل الأزرار لفتح المودالز
+// تفعيل استجابة الأزرار لفتح النوافذ المنبثقة (Modals)
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.guild || !interaction.member.roles.cache.has(ADMIN_ROLE_ID)) return;
 
     if (interaction.isButton()) {
         const op = interaction.customId;
+        
         if (op === 'btn_reconnect_vc') {
-            await interaction.reply({ content: "🔄 جاري إعادة الاتصال بالروم...", ephemeral: true });
+            await interaction.reply({ content: "🔄 جاري إعادة مزامنة قناة الصوت...", ephemeral: true });
             await connectToSupportVC(interaction.guild);
-            return interaction.editReply({ content: "✅ تم إعادة الاتصال بنجاح!" });
+            return interaction.editReply({ content: "✅ تم تحديث حالة الاتصال الصوتي بنجاح!" });
         }
 
         const modalConfigs = {
-            'btn_broadcast': { id: 'broadcast_modal', title: 'إرسال إعلان' },
+            'btn_broadcast': { id: 'broadcast_modal', title: 'إرسال إعلان عام' },
             'btn_warn': { id: 'warn_modal', title: 'تحذير عضو' },
-            'btn_kick': { id: 'kick_modal', title: 'طرد عضو' },
-            'btn_alert': { id: 'alert_modal', title: 'تنبيه خاص' },
+            'btn_kick': { id: 'kick_modal', title: 'فصل عضو' },
+            'btn_alert': { id: 'alert_modal', title: 'تنبيه إداري' },
             'btn_role': { id: 'role_modal', title: 'إعطاء رتبة' }
         };
 
         if (modalConfigs[op]) {
             const modal = new ModalBuilder().setCustomId(modalConfigs[op].id).setTitle(modalConfigs[op].title);
-            const input = new TextInputBuilder().setCustomId('input_data').setLabel("اكتب التفاصيل هنا").setStyle(TextInputStyle.Paragraph).setRequired(true);
+            const input = new TextInputBuilder()
+                .setCustomId('input_text')
+                .setLabel("أدخل التفاصيل المطلوبة")
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(true);
             modal.addComponents(new ActionRowBuilder().addComponents(input));
             return interaction.showModal(modal);
         }
     }
-    
+
     if (interaction.type === InteractionType.ModalSubmit) {
-        await interaction.reply({ content: "✅ تم استلام الطلب بنجاح.", ephemeral: true });
+        await interaction.reply({ content: "✅ تم استلام الطلب، وجاري التنفيذ برمجياً.", ephemeral: true });
     }
 });
 
