@@ -173,4 +173,6 @@ async def manual(ctx):
 if not TOKEN:
     raise ValueError("TOKEN not found in environment variables")
 
-bot.run(TOKEN)
+
+import os
+bot.run(os.getenv("TOKEN"))
