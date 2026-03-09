@@ -21,7 +21,7 @@ if not TOKEN:
     raise ValueError("TOKEN not found in environment variables")
 
 # ------------------------------------------------------------------------------
-# [2] إعدادات الربط والتشغيل (Configuration)
+# [2] إعدادات الربط والتشغيل
 # ------------------------------------------------------------------------------
 VOICE_ID = 1466581684290850984          # آيدي روم الانتظار الصوتي
 STAFF_CHANNEL_ID = 1467779526351392880  # روم تنبيه الإدارة
@@ -41,7 +41,7 @@ intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 
 # ------------------------------------------------------------------------------
-# [4] نوافذ إدخال البيانات (Modals)
+# [4] النوافذ المنبثقة
 # ------------------------------------------------------------------------------
 class WarningModal(Modal, title="إصدار تحذير رسمي"):
     user_id = TextInput(
@@ -123,7 +123,7 @@ class AnnouncementModal(Modal, title="نشر إعلان رتبة"):
 
 
 # ------------------------------------------------------------------------------
-# [5] لوحة التحكم RMOT
+# [5] لوحة التحكم
 # ------------------------------------------------------------------------------
 class ControlPanel(View):
     def __init__(self):
@@ -181,12 +181,12 @@ class ControlPanel(View):
         try:
             guild = interaction.guild
             vc = discord.utils.get(bot.voice_clients, guild=guild)
-            channel = bot.get_channel(VOICE_ID)
+            channel = await bot.fetch_channel(VOICE_ID)
 
             if vc and vc.is_connected():
                 await vc.disconnect(force=True)
 
-            if channel:
+            if isinstance(channel, discord.VoiceChannel):
                 await channel.connect(timeout=20, reconnect=True)
                 print(f"✅ Reconnected to voice channel: {channel.name}")
         except Exception as e:
@@ -197,10 +197,10 @@ class ControlPanel(View):
 # [6] دوال الصوت
 # ------------------------------------------------------------------------------
 async def ensure_voice_connected():
-    channel = bot.get_channel(VOICE_ID)
-
-    if channel is None:
-        print(f"❌ Voice channel not found: {VOICE_ID}")
+    try:
+        channel = await bot.fetch_channel(VOICE_ID)
+    except Exception as e:
+        print(f"❌ fetch_channel failed for VOICE_ID={VOICE_ID}: {e}")
         return
 
     if not isinstance(channel, discord.VoiceChannel):
@@ -212,16 +212,16 @@ async def ensure_voice_connected():
     vc = discord.utils.get(bot.voice_clients, guild=channel.guild)
 
     if vc and vc.is_connected():
+        print(f"✅ Already connected to: {vc.channel.name}")
         if vc.channel.id == channel.id:
-            print(f"✅ Already connected to: {vc.channel.name}")
             return
-        else:
-            try:
-                await vc.move_to(channel)
-                print(f"🔄 Moved to voice channel: {channel.name}")
-                return
-            except Exception as e:
-                print(f"❌ Voice move error: {e}")
+        try:
+            await vc.move_to(channel)
+            print(f"🔄 Moved to: {channel.name}")
+            return
+        except Exception as e:
+            print(f"❌ move_to error: {e}")
+            return
 
     try:
         print("🔄 Trying to connect to voice channel...")
@@ -230,7 +230,10 @@ async def ensure_voice_connected():
     except discord.Forbidden:
         print("❌ Missing permissions: View Channel + Connect + Speak")
     except discord.ClientException as e:
-        print(f"❌ ClientException while connecting: {e}")
+        if "Already connected" in str(e):
+            print("✅ البوت متصل بالفعل في الروم الصوتي")
+        else:
+            print(f"❌ ClientException while connecting: {e}")
     except asyncio.TimeoutError:
         print("❌ Voice connection timed out")
     except Exception as e:
@@ -252,9 +255,12 @@ def play_welcome_sound(guild: discord.Guild):
         if vc.is_playing():
             vc.stop()
 
-        source = discord.FFmpegPCMAudio(AUDIO_FILE)
+        source = discord.FFmpegPCMAudio(
+            executable="ffmpeg",
+            source=AUDIO_FILE
+        )
         vc.play(source)
-        print("🔊 تم تشغيل صوت الترحيب")
+        print(f"🔊 تم تشغيل الصوت: {AUDIO_FILE}")
     except Exception as e:
         print(f"❌ FFmpeg/Play error: {e}")
 
@@ -265,6 +271,11 @@ def play_welcome_sound(guild: discord.Guild):
 @bot.event
 async def on_ready():
     print(f"✅ {bot.user} متصل وجاهز")
+    print(f"✅ Logged in as {bot.user} | id={bot.user.id}")
+
+    for guild in bot.guilds:
+        print(f"📌 Guild: {guild.name} | id={guild.id}")
+
     bot.add_view(ControlPanel())
 
     if not stay_in_voice.is_running():
@@ -301,6 +312,7 @@ async def on_voice_state_update(member, before, after):
 
             try:
                 await ensure_voice_connected()
+                await asyncio.sleep(2)
                 play_welcome_sound(member.guild)
             except Exception as e:
                 print(f"❌ Voice welcome error: {e}")
@@ -347,6 +359,12 @@ async def manual(ctx):
         inline=False
     )
     await ctx.send(embed=guide)
+
+
+@bot.command(name='تجربة')
+async def test_sound(ctx):
+    play_welcome_sound(ctx.guild)
+    await ctx.send("✅ حاولت أشغل الصوت")
 
 
 # ------------------------------------------------------------------------------
