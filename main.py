@@ -1,19 +1,20 @@
 # ==============================================================================
-# المشروع: بوت RMOT الصوتي - الإصدار الرابع (Support Queue + Points System)
-# الوصف: نسخة محسنة مع نظام قبول/رفض الطلبات + نقاط للدعم الفني + تصعيد للإدارة بعد 5 دقائق
+# المشروع: بوت RMOT الصوتي - الإصدار الرابع (Stable Voice + Support Points)
+# الوصف: نسخة محسنة مع نظام قبول/رفض الطلبات + نقاط للدعم الفني + تصعيد للإدارة
+#        وتم تعديل نظام الصوت بالكامل ليشتغل بشكل ثابت مع ملف mp3 محلي
 # ==============================================================================
 
 import os
 import json
-import asyncio
 import time
+import asyncio
 import discord
 from discord.ext import commands, tasks
 from discord.ui import View, Modal, TextInput
 from dotenv import load_dotenv
 
 # ------------------------------------------------------------------------------
-# [1] تحميل التوكن من متغيرات البيئة
+# [1] تحميل التوكن
 # ------------------------------------------------------------------------------
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
@@ -22,16 +23,22 @@ if not TOKEN:
     raise ValueError("TOKEN not found in environment variables")
 
 # ------------------------------------------------------------------------------
-# [2] إعدادات الربط والتشغيل
+# [2] الإعدادات
 # ------------------------------------------------------------------------------
-VOICE_ID = 1466581684290850984               # آيدي روم الانتظار الصوتي
-STAFF_CHANNEL_ID = 1467779526351392880       # روم تنبيه الإدارة / الدعم
-ADMIN_ROLE_ID = 1466572944166883461          # رتبة الإدارة
-SUPPORT_ROLE_ID = 1467515919046541494        # رتبة الدعم الفني
-AUDIO_FILE = "support.mp3"                   # ملف الصوت
-PANEL_IMAGE = "POT.png"                      # صورة البنل
-POINTS_FILE = "support_points.json"          # ملف حفظ النقاط
-ESCALATION_SECONDS = 300                     # 5 دقائق
+VOICE_ID = 1466581684290850984
+STAFF_CHANNEL_ID = 1467779526351392880
+ADMIN_ROLE_ID = 1466572944166883461
+SUPPORT_ROLE_ID = 1467515919046541494
+
+AUDIO_FILE = "support.mp3"
+PANEL_IMAGE = "POT.png"
+POINTS_FILE = "support_points.json"
+
+ESCALATION_SECONDS = 300  # 5 دقائق
+VOICE_REFRESH_HOURS = 1   # كل ساعة
+
+# إذا عندك ffmpeg في مسار معين حطه في .env باسم FFMPEG_PATH
+FFMPEG_EXECUTABLE = os.getenv("FFMPEG_PATH", "ffmpeg")
 
 # ------------------------------------------------------------------------------
 # [3] إعدادات البوت
@@ -42,28 +49,27 @@ intents.voice_states = True
 intents.guilds = True
 intents.members = True
 
-bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # ------------------------------------------------------------------------------
 # [4] متغيرات عامة
 # ------------------------------------------------------------------------------
 voice_lock = asyncio.Lock()
-last_voice_refresh = 0
 
-# pending_requests:
-# member_id -> {
-#   "claimed": bool,
-#   "claimed_by": int | None,
-#   "message_id": int | None,
-#   "created_at": float,
-#   "staff_channel_id": int,
-#   "guild_id": int
-# }
+# member_id -> request data
 pending_requests = {}
 
 # ------------------------------------------------------------------------------
-# [5] إدارة النقاط
+# [5] وظائف مساعدة
 # ------------------------------------------------------------------------------
+def has_role(member: discord.Member, role_id: int) -> bool:
+    return any(role.id == role_id for role in getattr(member, "roles", []))
+
+def get_audio_path() -> str:
+    # نفس مجلد الكود الحالي
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_dir, AUDIO_FILE)
+
 def load_points():
     if not os.path.exists(POINTS_FILE):
         return {}
@@ -73,18 +79,15 @@ def load_points():
             data = json.load(f)
             return {int(k): int(v) for k, v in data.items()}
     except Exception as e:
-        print(f"❌ Failed to load points file: {e}")
+        print(f"❌ Failed to load points: {e}")
         return {}
 
 def save_points():
     try:
-        serializable = {str(k): v for k, v in support_points.items()}
         with open(POINTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(serializable, f, ensure_ascii=False, indent=2)
+            json.dump({str(k): v for k, v in support_points.items()}, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"❌ Failed to save points file: {e}")
-
-support_points = load_points()
+        print(f"❌ Failed to save points: {e}")
 
 def add_point(user_id: int):
     support_points[user_id] = support_points.get(user_id, 0) + 1
@@ -94,8 +97,7 @@ def reset_all_points():
     support_points.clear()
     save_points()
 
-def has_role(member: discord.Member, role_id: int) -> bool:
-    return any(role.id == role_id for role in getattr(member, "roles", []))
+support_points = load_points()
 
 # ------------------------------------------------------------------------------
 # [6] النوافذ المنبثقة
@@ -178,7 +180,7 @@ class AnnouncementModal(Modal, title="نشر إعلان رتبة"):
             await interaction.followup.send("❌ صار خطأ أثناء الإرسال.", ephemeral=True)
 
 # ------------------------------------------------------------------------------
-# [7] أزرار الطلبات (قبول / رفض)
+# [7] أزرار طلبات الدعم
 # ------------------------------------------------------------------------------
 class SupportRequestView(View):
     def __init__(self, member_id: int):
@@ -196,25 +198,26 @@ class SupportRequestView(View):
             return
 
         if not has_role(interaction.user, SUPPORT_ROLE_ID):
-            await interaction.response.send_message("❌ هذا الزر مخصص للدعم الفني فقط.", ephemeral=True)
+            await interaction.response.send_message("❌ هذا الزر للدعم الفني فقط.", ephemeral=True)
             return
 
         request_data = pending_requests.get(self.member_id)
         if not request_data:
-            await interaction.response.send_message("⚠️ هذا الطلب غير موجود أو انتهى.", ephemeral=True)
+            await interaction.response.send_message("⚠️ الطلب هذا غير موجود أو انتهى.", ephemeral=True)
             return
 
         if request_data["claimed"]:
             claimer_id = request_data.get("claimed_by")
-            claimer_text = f"<@{claimer_id}>" if claimer_id else "موظف آخر"
             await interaction.response.send_message(
-                f"⚠️ تم قبول هذا الطلب مسبقًا بواسطة {claimer_text}.",
+                f"⚠️ تم قبول الطلب مسبقًا بواسطة <@{claimer_id}>.",
                 ephemeral=True
             )
             return
 
         request_data["claimed"] = True
         request_data["claimed_by"] = interaction.user.id
+        request_data["claimed_at"] = time.time()
+
         add_point(interaction.user.id)
 
         member = interaction.guild.get_member(self.member_id)
@@ -223,14 +226,14 @@ class SupportRequestView(View):
         embed = discord.Embed(
             title="✅ تم قبول الطلب",
             description=(
-                f"تم استلام طلب العضو {member_mention}\n"
-                f"بواسطة {interaction.user.mention}\n\n"
-                f"🏅 مجموع نقاطه الآن: **{support_points.get(interaction.user.id, 0)}**"
+                f"العضو: {member_mention}\n"
+                f"الموظف: {interaction.user.mention}\n"
+                f"النقاط الحالية: **{support_points.get(interaction.user.id, 0)}**"
             ),
             color=0x00ff00
         )
 
-        await interaction.response.edit_message(embed=embed, view=None)
+        await interaction.response.edit_message(content=None, embed=embed, view=None)
 
     @discord.ui.button(
         label="رفض الطلب ❌",
@@ -243,28 +246,32 @@ class SupportRequestView(View):
             return
 
         if not has_role(interaction.user, SUPPORT_ROLE_ID):
-            await interaction.response.send_message("❌ هذا الزر مخصص للدعم الفني فقط.", ephemeral=True)
+            await interaction.response.send_message("❌ هذا الزر للدعم الفني فقط.", ephemeral=True)
             return
 
         request_data = pending_requests.get(self.member_id)
         if not request_data:
-            await interaction.response.send_message("⚠️ هذا الطلب غير موجود أو انتهى.", ephemeral=True)
+            await interaction.response.send_message("⚠️ الطلب هذا غير موجود أو انتهى.", ephemeral=True)
             return
 
         if request_data["claimed"]:
-            await interaction.response.send_message(
-                "⚠️ هذا الطلب تم قبوله مسبقًا ولا يمكن رفضه الآن.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("⚠️ هذا الطلب تم قبوله مسبقًا.", ephemeral=True)
             return
 
         member = interaction.guild.get_member(self.member_id)
         member_mention = member.mention if member else f"`{self.member_id}`"
 
-        await interaction.response.send_message(
-            f"❌ {interaction.user.mention} رفض طلب العضو {member_mention}.",
-            ephemeral=False
+        embed = discord.Embed(
+            title="❌ تم رفض الطلب",
+            description=(
+                f"العضو: {member_mention}\n"
+                f"بواسطة: {interaction.user.mention}\n"
+                f"الطلب ما زال بانتظار موظف آخر أو تصعيد الإدارة."
+            ),
+            color=0xff0000
         )
+
+        await interaction.response.edit_message(content=None, embed=embed, view=SupportRequestView(self.member_id))
 
 # ------------------------------------------------------------------------------
 # [8] لوحة التحكم
@@ -292,7 +299,6 @@ class ControlPanel(View):
         if not has_role(interaction.user, ADMIN_ROLE_ID):
             await interaction.response.send_message("❌ للإدارة فقط!", ephemeral=True)
             return
-
         await interaction.response.send_message(
             "👢 نظام الطرد اليدوي: يرجى استخدام الأمر الإداري المباشر.",
             ephemeral=True
@@ -303,7 +309,6 @@ class ControlPanel(View):
         if not has_role(interaction.user, ADMIN_ROLE_ID):
             await interaction.response.send_message("❌ للإدارة فقط!", ephemeral=True)
             return
-
         await interaction.response.send_message(
             "🔔 تم تفعيل نظام التنبيهات السريع.",
             ephemeral=True
@@ -314,7 +319,6 @@ class ControlPanel(View):
         if not has_role(interaction.user, ADMIN_ROLE_ID):
             await interaction.response.send_message("❌ للإدارة فقط!", ephemeral=True)
             return
-
         await interaction.response.send_message(
             "🏅 يرجى الانتظار في الروم الصوتي ليتم تسليمك الرتبة.",
             ephemeral=True
@@ -325,27 +329,19 @@ class ControlPanel(View):
         if not has_role(interaction.user, ADMIN_ROLE_ID):
             await interaction.response.send_message("❌ للإدارة فقط!", ephemeral=True)
             return
-
         await interaction.response.send_message(
             "ℹ️ RMOT V4: نظام التحكم الصوتي والإداري المتكامل مع نقاط الدعم الفني.",
             ephemeral=True
         )
 
     @discord.ui.button(label="إعادة اتصال صوتي 🔄", style=discord.ButtonStyle.blurple, custom_id="m_recon")
-    async def reconnect(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def reconnect_voice_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not has_role(interaction.user, ADMIN_ROLE_ID):
             await interaction.response.send_message("❌ للإدارة فقط!", ephemeral=True)
             return
 
-        await interaction.response.send_message(
-            "🔄 جاري تحديث اتصال البوت الصوتي...",
-            ephemeral=True
-        )
-
-        try:
-            await reconnect_voice()
-        except Exception as e:
-            print(f"Reconnect button error: {e}")
+        await interaction.response.send_message("🔄 جاري إعادة الاتصال الصوتي...", ephemeral=True)
+        await reconnect_voice()
 
     @discord.ui.button(label="كشف النقاط 📊", style=discord.ButtonStyle.green, custom_id="m_points")
     async def show_points(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -358,36 +354,30 @@ class ControlPanel(View):
             return
 
         sorted_points = sorted(support_points.items(), key=lambda x: x[1], reverse=True)
-
         lines = []
-        rank = 1
-        for user_id, points in sorted_points:
-            lines.append(f"**{rank}.** <@{user_id}> — **{points}** نقطة")
-            rank += 1
+        for i, (user_id, points) in enumerate(sorted_points, start=1):
+            lines.append(f"**{i}.** <@{user_id}> — **{points}** نقطة")
 
         embed = discord.Embed(
             title="📊 كشف نقاط الدعم الفني",
             description="\n".join(lines),
             color=0x00ff00
         )
-
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="تصفير النقاط ♻️", style=discord.ButtonStyle.red, custom_id="m_reset_points")
-    async def reset_points_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def reset_points_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not has_role(interaction.user, ADMIN_ROLE_ID):
             await interaction.response.send_message("❌ للإدارة فقط!", ephemeral=True)
             return
 
         reset_all_points()
-        await interaction.response.send_message("✅ تم تصفير جميع نقاط الدعم الفني.", ephemeral=True)
+        await interaction.response.send_message("✅ تم تصفير نقاط الدعم الفني.", ephemeral=True)
 
 # ------------------------------------------------------------------------------
-# [9] دوال الصوت
+# [9] نظام الصوت
 # ------------------------------------------------------------------------------
 async def ensure_voice_connected():
-    global last_voice_refresh
-
     async with voice_lock:
         try:
             channel = await bot.fetch_channel(VOICE_ID)
@@ -402,9 +392,9 @@ async def ensure_voice_connected():
         vc = discord.utils.get(bot.voice_clients, guild=channel.guild)
 
         if vc and vc.is_connected():
+            if vc.channel and vc.channel.id == channel.id:
+                return
             try:
-                if vc.channel and vc.channel.id == channel.id:
-                    return
                 await vc.move_to(channel)
                 print(f"🔄 Moved to voice channel: {channel.name}")
                 return
@@ -418,81 +408,83 @@ async def ensure_voice_connected():
         try:
             print("🔄 Trying to connect to voice channel...")
             await channel.connect(timeout=20, reconnect=True)
-            last_voice_refresh = time.time()
             print(f"✅ Connected to voice channel: {channel.name}")
         except discord.Forbidden:
             print("❌ Missing permissions: View Channel + Connect + Speak")
         except discord.ClientException as e:
-            if "Already connected" in str(e):
-                print("✅ البوت متصل بالفعل في الروم الصوتي")
-            else:
-                print(f"❌ ClientException while connecting: {e}")
+            print(f"❌ ClientException while connecting: {e}")
         except asyncio.TimeoutError:
             print("❌ Voice connection timed out")
         except Exception as e:
             print(f"❌ Unexpected voice connect error: {type(e).__name__}: {e}")
 
 async def reconnect_voice():
-    try:
-        guild = bot.guilds[0] if bot.guilds else None
-        if not guild:
-            return
+    async with voice_lock:
+        try:
+            for vc in list(bot.voice_clients):
+                try:
+                    await vc.disconnect(force=True)
+                except Exception as e:
+                    print(f"❌ Failed to disconnect voice client: {e}")
 
-        vc = discord.utils.get(bot.voice_clients, guild=guild)
-        if vc:
-            try:
-                await vc.disconnect(force=True)
-                await asyncio.sleep(2)
-            except Exception as e:
-                print(f"❌ Failed to disconnect old voice client: {e}")
+            await asyncio.sleep(2)
+        except Exception as e:
+            print(f"❌ reconnect disconnect phase error: {e}")
 
-        await ensure_voice_connected()
-    except Exception as e:
-        print(f"❌ reconnect_voice error: {e}")
+    await ensure_voice_connected()
 
 async def play_welcome_sound(guild: discord.Guild):
+    audio_path = get_audio_path()
+
+    if not os.path.isfile(audio_path):
+        print(f"❌ ملف الصوت غير موجود: {audio_path}")
+        return
+
     async with voice_lock:
         vc = discord.utils.get(bot.voice_clients, guild=guild)
 
         if not vc or not vc.is_connected():
             print("❌ البوت غير متصل صوتياً وقت تشغيل الصوت")
             await ensure_voice_connected()
+            await asyncio.sleep(1)
             vc = discord.utils.get(bot.voice_clients, guild=guild)
 
         if not vc or not vc.is_connected():
             print("❌ تعذر تشغيل الصوت لأن الاتصال الصوتي غير موجود")
             return
 
-        if not os.path.exists(AUDIO_FILE):
-            print(f"❌ ملف الصوت غير موجود: {AUDIO_FILE}")
-            return
-
         try:
             if vc.is_playing() or vc.is_paused():
                 vc.stop()
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.7)
+
+            print(f"🎵 تشغيل الملف: {audio_path}")
+            print(f"🎵 ffmpeg executable: {FFMPEG_EXECUTABLE}")
 
             source = discord.FFmpegPCMAudio(
-                executable="ffmpeg",
-                source=AUDIO_FILE,
-                before_options="-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                source=audio_path,
+                executable=FFMPEG_EXECUTABLE,
                 options="-vn"
             )
-            vc.play(source)
-            print(f"🔊 تم تشغيل الصوت: {AUDIO_FILE}")
+
+            def after_play(error):
+                if error:
+                    print(f"❌ Audio after callback error: {error}")
+                else:
+                    print("✅ انتهى تشغيل الصوت بنجاح")
+
+            vc.play(source, after=after_play)
+            print(f"🔊 تم تشغيل الصوت: {audio_path}")
+
         except Exception as e:
-            print(f"❌ FFmpeg/Play error: {e}")
+            print(f"❌ FFmpeg/Play error: {type(e).__name__}: {e}")
             try:
-                if vc.is_connected():
-                    await vc.disconnect(force=True)
+                await vc.disconnect(force=True)
             except Exception:
                 pass
 
-            await asyncio.sleep(2)
-            await ensure_voice_connected()
-
 # ------------------------------------------------------------------------------
-# [10] نظام الطلبات
+# [10] التصعيد للإدارة بعد 5 دقائق
 # ------------------------------------------------------------------------------
 async def escalate_if_needed(member: discord.Member):
     await asyncio.sleep(ESCALATION_SECONDS)
@@ -517,21 +509,19 @@ async def escalate_if_needed(member: discord.Member):
             f"🚨 <@&{ADMIN_ROLE_ID}> لم يتم قبول طلب العضو {member.mention} خلال 5 دقائق."
         )
     except Exception as e:
-        print(f"❌ Failed to escalate to admin: {e}")
+        print(f"❌ Failed to escalate request: {e}")
 
 # ------------------------------------------------------------------------------
-# [11] أحداث البوت
+# [11] الأحداث
 # ------------------------------------------------------------------------------
 @bot.event
 async def on_ready():
-    print(f"✅ {bot.user} متصل وجاهز")
     print(f"✅ Logged in as {bot.user} | id={bot.user.id}")
-
-    for guild in bot.guilds:
-        print(f"📌 Guild: {guild.name} | id={guild.id}")
+    print(f"🎵 Audio file absolute path: {get_audio_path()}")
+    print(f"🎵 FFmpeg executable: {FFMPEG_EXECUTABLE}")
 
     bot.add_view(ControlPanel())
-    bot.add_view(SupportRequestView(0))  # تسجيل الـ custom_id للأزرار
+    bot.add_view(SupportRequestView(0))
 
     if not stay_in_voice.is_running():
         stay_in_voice.start()
@@ -557,11 +547,14 @@ async def voice_health_check():
     try:
         for vc in bot.voice_clients:
             if not vc.is_connected():
-                print("⚠️ Voice client غير متصل، جاري إعادة الاتصال...")
+                print("⚠️ Voice client disconnected, reconnecting...")
                 await reconnect_voice()
-            elif vc.channel is None:
-                print("⚠️ Voice client بدون قناة، جاري إعادة الاتصال...")
+                return
+
+            if vc.channel is None:
+                print("⚠️ Voice client has no channel, reconnecting...")
                 await reconnect_voice()
+                return
     except Exception as e:
         print(f"❌ voice_health_check error: {e}")
 
@@ -569,9 +562,9 @@ async def voice_health_check():
 async def before_voice_health_check():
     await bot.wait_until_ready()
 
-@tasks.loop(hours=3)
+@tasks.loop(hours=VOICE_REFRESH_HOURS)
 async def periodic_voice_refresh():
-    print("🔄 إعادة تهيئة صوتية دورية لمنع التعليق...")
+    print("🔄 إعادة تهيئة صوتية دورية كل ساعة...")
     await reconnect_voice()
 
 @periodic_voice_refresh.before_loop
@@ -583,6 +576,7 @@ async def on_voice_state_update(member, before, after):
     if member.bot:
         return
 
+    # دخل روم الانتظار
     if after.channel and after.channel.id == VOICE_ID:
         if before.channel is None or before.channel.id != VOICE_ID:
             try:
@@ -620,72 +614,55 @@ async def on_voice_state_update(member, before, after):
 
             try:
                 await ensure_voice_connected()
-                await asyncio.sleep(2)
+                await asyncio.sleep(1.5)
                 await play_welcome_sound(member.guild)
             except Exception as e:
                 print(f"❌ Voice welcome error: {e}")
 
+    # إذا طلع العضو من روم الانتظار نحذف طلبه لو ما انقبل
+    if before.channel and before.channel.id == VOICE_ID and (after.channel is None or after.channel.id != VOICE_ID):
+        if member.id in pending_requests and not pending_requests[member.id]["claimed"]:
+            del pending_requests[member.id]
+            print(f"🗑️ تم حذف الطلب المعلق للعضو {member} لأنه خرج من روم الانتظار")
+
 # ------------------------------------------------------------------------------
 # [12] الأوامر
 # ------------------------------------------------------------------------------
-@bot.command(name='مساعدة')
+@bot.command(name="مساعدة")
 async def show_panel(ctx):
-    if has_role(ctx.author, ADMIN_ROLE_ID):
-        embed = discord.Embed(
-            title="🛡️ لوحة التحكم الإدارية الكبرى",
-            description=(
-                "**الصوتي RMOT نظام 4**\n\n"
-                "اضغط على الأزرار لفتح نوافذ التحكم والإرسال التلقائي للخاص.\n"
-                "وإدارة نقاط الدعم الفني."
-            ),
-            color=0x2b2d31
-        )
-
-        if os.path.exists(PANEL_IMAGE):
-            file = discord.File(PANEL_IMAGE, filename="p.png")
-            embed.set_image(url="attachment://p.png")
-            await ctx.send(file=file, embed=embed, view=ControlPanel())
-        else:
-            await ctx.send(embed=embed, view=ControlPanel())
-    else:
+    if not has_role(ctx.author, ADMIN_ROLE_ID):
         await ctx.send("❌ للإدارة فقط!")
+        return
 
-@bot.command(name='هيلب')
+    embed = discord.Embed(
+        title="🛡️ لوحة التحكم الإدارية الكبرى",
+        description="**الصوتي RMOT نظام 4**\n\nاضغط على الأزرار للتحكم الكامل وإدارة نقاط الدعم الفني.",
+        color=0x2b2d31
+    )
+
+    if os.path.exists(PANEL_IMAGE):
+        file = discord.File(PANEL_IMAGE, filename="p.png")
+        embed.set_image(url="attachment://p.png")
+        await ctx.send(file=file, embed=embed, view=ControlPanel())
+    else:
+        await ctx.send(embed=embed, view=ControlPanel())
+
+@bot.command(name="هيلب")
 async def manual(ctx):
-    guide = discord.Embed(title="📚 دليل تشغيل بوت RMOT V4", color=0x00ff00)
-    guide.add_field(
-        name="❓ زر التحذير",
-        value="يفتح لك نافذة تطلب منك آيدي العضو والسبب، ثم يرسل له البوت في الخاص مباشرة.",
-        inline=False
-    )
-    guide.add_field(
-        name="❓ زر الإعلان",
-        value="يطلب منك آيدي الرتبة، ويرسل الإعلان لكل أعضاء هذه الرتبة في الخاص تلقائياً.",
-        inline=False
-    )
-    guide.add_field(
-        name="❓ نظام الانتظار",
-        value="عند دخول عضو لروم الانتظار يتم إرسال طلب للدعم الفني مع زر قبول وزر رفض، وإذا لم يتم قبول الطلب خلال 5 دقائق يتم تصعيده للإدارة.",
-        inline=False
-    )
-    guide.add_field(
-        name="❓ نقاط الدعم الفني",
-        value="كل موظف دعم فني يقبل طلبًا يحصل على نقطة، ويمكن للإدارة عرض النقاط أو تصفيرها من لوحة التحكم.",
-        inline=False
-    )
-    guide.add_field(
-        name="❓ النظام الصوتي",
-        value="البوت يدخل الروم 24/7 ويشغل الصوت الترحيبي مع إعادة اتصال دورية لمنع التعليق.",
-        inline=False
-    )
-    await ctx.send(embed=guide)
+    embed = discord.Embed(title="📚 دليل تشغيل بوت RMOT V4", color=0x00ff00)
+    embed.add_field(name="زر التحذير", value="يرسل تحذير للعضو في الخاص.", inline=False)
+    embed.add_field(name="زر الإعلان", value="يرسل إعلان لكل أعضاء رتبة معينة في الخاص.", inline=False)
+    embed.add_field(name="نظام الانتظار", value="يرسل تنبيه للدعم الفني مع أزرار قبول ورفض.", inline=False)
+    embed.add_field(name="نظام النقاط", value="كل قبول طلب = نقطة للداعم.", inline=False)
+    embed.add_field(name="النظام الصوتي", value="يدخل الروم 24/7 ويعيد الاتصال كل ساعة.", inline=False)
+    await ctx.send(embed=embed)
 
-@bot.command(name='تجربة')
+@bot.command(name="تجربة")
 async def test_sound(ctx):
     await play_welcome_sound(ctx.guild)
-    await ctx.send("✅ حاولت أشغل الصوت")
+    await ctx.send("✅ حاولت أشغل الصوت، شيك اللوق.")
 
-@bot.command(name='نقاط')
+@bot.command(name="نقاط")
 async def points_command(ctx):
     if not has_role(ctx.author, ADMIN_ROLE_ID):
         await ctx.send("❌ للإدارة فقط!")
@@ -696,12 +673,7 @@ async def points_command(ctx):
         return
 
     sorted_points = sorted(support_points.items(), key=lambda x: x[1], reverse=True)
-
-    lines = []
-    rank = 1
-    for user_id, points in sorted_points:
-        lines.append(f"**{rank}.** <@{user_id}> — **{points}** نقطة")
-        rank += 1
+    lines = [f"**{i}.** <@{uid}> — **{pts}** نقطة" for i, (uid, pts) in enumerate(sorted_points, start=1)]
 
     embed = discord.Embed(
         title="📊 كشف نقاط الدعم الفني",
@@ -710,16 +682,16 @@ async def points_command(ctx):
     )
     await ctx.send(embed=embed)
 
-@bot.command(name='تصفير_النقاط')
+@bot.command(name="تصفير_النقاط")
 async def reset_points_command(ctx):
     if not has_role(ctx.author, ADMIN_ROLE_ID):
         await ctx.send("❌ للإدارة فقط!")
         return
 
     reset_all_points()
-    await ctx.send("✅ تم تصفير نقاط الدعم الفني.")
+    await ctx.send("✅ تم تصفير النقاط.")
 
 # ------------------------------------------------------------------------------
-# [13] تشغيل البوت
+# [13] التشغيل
 # ------------------------------------------------------------------------------
 bot.run(TOKEN)
